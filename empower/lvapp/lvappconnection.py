@@ -45,6 +45,10 @@ from empower.lvapp import PT_DEL_LVAP
 from empower.lvapp import DEL_LVAP
 from empower.lvapp import PT_PROBE_RESPONSE
 from empower.lvapp import PROBE_RESPONSE
+from empower.lvapp import PT_INCOM_MCAST_REQUEST
+from empower.lvapp import INCOM_MCAST_REQUEST
+from empower.lvapp import PT_INCOM_MCAST_RESPONSE
+from empower.lvapp import INCOM_MCAST_RESPONSE
 from empower.core.lvap import LVAP
 from empower.core.networkport import NetworkPort
 from empower.core.vap import VAP
@@ -158,12 +162,16 @@ class LVAPPConnection(object):
 
     def _trigger_message(self, msg_type):
 
+        #print("NEW MESSAGE TYPE 1", msg_type)
+
         if msg_type not in self.server.pt_types:
+            #print("NEW MESSAGE TYPE 2", msg_type)
 
             LOG.error("Unknown message type %u", msg_type)
             return
 
         if self.server.pt_types[msg_type]:
+            #print("NEW MESSAGE TYPE 3", msg_type)
 
             msg = self.server.pt_types[msg_type].parse(self.__buffer)
             addr = EtherAddress(msg.wtp)
@@ -177,8 +185,12 @@ class LVAPPConnection(object):
 
             handler_name = "_handle_%s" % self.server.pt_types[msg_type].name
 
+            #print("NEW MESSAGE TYPE 4 NAME %s" % (handler_name))
+
             if hasattr(self, handler_name):
+                #print("NEW MESSAGE TYPE 5 NAME %s" % (handler_name))
                 handler = getattr(self, handler_name)
+                #print(handler)
                 handler(wtp, msg)
 
         if msg_type in self.server.pt_types_handlers:
@@ -938,4 +950,54 @@ class LVAPPConnection(object):
         LOG.info("Add lvap %s", lvap)
 
         msg = ADD_LVAP.build(add_lvap)
+        self.stream.write(msg)
+
+    def _handle_incom_mcast_addr(self, wtp, request):
+        """Handle an incoming INCOM_MCAST_REQUEST message.
+        Args:
+            request, a INCOM_MCAST_REQUEST message
+        Returns:
+            None
+        """
+
+        LOG.info("New multicast address connection from %s WTP %s seq %u", self.addr[0], wtp.addr, request.seq)
+
+        if not wtp.connection:
+            LOG.info("Multicast incomming connection from disconnected WTP %s", wtp.addr)
+            return
+
+        mcast_addr = EtherAddress(request.mcast_addr)
+        iface = int(request.iface)
+
+        if not mcast_addr:
+            LOG.info("Unknown mcast addr from wtp %s", wtp)
+            return
+
+        LOG.info("Sending register incoming mcast address %s REQUEST from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
+        self.send_incom_mcast_addr_response(mcast_addr, wtp, iface)
+        self.send_register_incomming_mcast_address_message_to_self(request)
+
+    def send_register_incomming_mcast_address_message_to_self(self, request):
+        """Send a unsollicited INCOM_MCAST_REQUEST message to self."""
+
+        for handler in self.server.pt_types_handlers[PT_INCOM_MCAST_REQUEST]:
+            print("send_register_incomming_mcast_address_message_to_self")
+            handler(request)
+
+    def send_incom_mcast_addr_response(self, mcast_addr, wtp, iface):
+        """Send a INCOM_MCAST_RESPONSE message.
+        Args:
+            mcast_addr: an EtherAddress object
+        Returns:
+            None
+        """
+        response = Container(version=PT_VERSION,
+                             type=PT_INCOM_MCAST_RESPONSE,
+                             length=24,
+                             seq=wtp.seq,
+                             mcast_addr=mcast_addr.to_raw(),
+                             iface=iface)
+
+        msg = INCOM_MCAST_RESPONSE.build(response)
+        LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.stream.write(msg)
