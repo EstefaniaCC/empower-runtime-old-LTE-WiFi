@@ -37,7 +37,6 @@ import json
 from empower.core.resourcepool import TX_MCAST_DMS
 from empower.core.resourcepool import TX_MCAST_LEGACY
 from empower.datatypes.etheraddress import EtherAddress
-from empower.main import RUNTIME
 
 import empower.logger
 LOG = empower.logger.get_logger()
@@ -59,6 +58,7 @@ class MCastWTPInfo(object):
         self.__mode = None
         self.__dms_max_period = 1
         self.__legacy_max_period = 3
+        self.__current_period = 0
         self.__attached_clients_rssi = dict()
         self.__avg_perceived_rssi = 0
         self.__dev_perceived_rssi = 0
@@ -83,6 +83,16 @@ class MCastWTPInfo(object):
     def legacy_max_period(self, legacy_max_period):
 
         self.__legacy_max_period = legacy_max_period
+
+    @property
+    def current_period(self):
+        """Return the current_period of the object."""
+        return self.__current_period
+
+    @current_period.setter
+    def current_period(self, current_period):
+
+        self.__current_period = current_period
 
     @property
     def last_prob_update(self):

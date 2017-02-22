@@ -53,6 +53,9 @@ PT_ADD_VAP = 0x31
 PT_DEL_VAP = 0x32
 PT_STATUS_VAP = 0x33
 
+PT_INCOM_MCAST_REQUEST = 0x38
+PT_INCOM_MCAST_RESPONSE = 0x39
+
 HEADER = Struct("header", UBInt8("version"),
                 UBInt8("type"),
                 UBInt32("length"))
@@ -236,6 +239,21 @@ STATUS_VAP = Struct("status_vap", UBInt8("version"),
                     Bytes("net_bssid", 6),
                     Bytes("ssid", lambda ctx: ctx.length - 30))
 
+INCOM_MCAST_REQUEST = Struct("incom_mcast_addr", UBInt8("version"),
+                    UBInt8("type"),
+                    UBInt32("length"),
+                    UBInt32("seq"),
+                    Bytes("wtp", 6),
+                    Bytes("mcast_addr", 6),
+                    UBInt8("iface"))
+
+INCOM_MCAST_RESPONSE = Struct("incom_mcast_addr_response", UBInt8("version"),
+                    UBInt8("type"),
+                    UBInt32("length"),
+                    UBInt32("seq"),
+                    Bytes("mcast_addr", 6),
+                    UBInt8("iface"))
+
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
             PT_LVAP_JOIN: None,
@@ -253,7 +271,9 @@ PT_TYPES = {PT_BYE: None,
             PT_CAPS: CAPS,
             PT_SET_PORT: SET_PORT,
             PT_STATUS_PORT: STATUS_PORT,
-            PT_STATUS_VAP: STATUS_VAP}
+            PT_STATUS_VAP: STATUS_VAP,
+            PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
+            PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -272,4 +292,6 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_CAPS: [],
                      PT_SET_PORT: [],
                      PT_STATUS_PORT: [],
-                     PT_STATUS_VAP: []}
+                     PT_STATUS_VAP: [],
+                     PT_INCOM_MCAST_REQUEST: [],
+                     PT_INCOM_MCAST_RESPONSE: []}
