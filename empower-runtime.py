@@ -39,6 +39,7 @@ if __name__ == "__main__":
              'events.uejoin',
              'events.ueleave',
              'bin_counter.bin_counter',
+             'wtp_bin_counter.wtp_bin_counter',
              'txp_bin_counter.txp_bin_counter',
              'maps.ucqm',
              'maps.ncqm',

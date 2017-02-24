@@ -153,6 +153,7 @@ class LVAP(object):
         # change to the agent
         self._ssids = []
         self._encap = None
+        self._group = 6000
 
         # the following parameters can be updated by both agent and
         # controller. The controller sets them when a client successfully
@@ -177,7 +178,10 @@ class LVAP(object):
         self.__ports = {}
 
         # downlink intent uuid
-        self.dl_intent = None
+        self.poa_uuid = None
+
+        # supported resource blocks
+        self.supported = ResourcePool()
 
     def set_ports(self):
         """Set virtual ports.
@@ -201,16 +205,16 @@ class LVAP(object):
 
         # set/update intent
         intent = {'version': '1.0',
-                  'ttp_dpid': self.__ports[0].dpid,
-                  'ttp_port': self.__ports[0].ovs_port_id,
-                  'match': {'dl_dst': self.addr}}
+                  'dpid': self.__ports[0].dpid,
+                  'port': self.__ports[0].ovs_port_id,
+                  'hwaddr': self.addr}
 
         intent_server = RUNTIME.components[IntentServer.__module__]
 
-        if self.dl_intent:
-            intent_server.update_intent(self.dl_intent, intent)
+        if self.poa_uuid:
+            intent_server.update_poa(intent, self.poa_uuid)
         else:
-            self.dl_intent = intent_server.send_intent(intent)
+            self.poa_uuid = intent_server.add_poa(intent)
 
     @property
     def ports(self):
@@ -228,6 +232,22 @@ class LVAP(object):
         for port in self.uplink.values():
             port.block.radio.connection.send_add_lvap(port.lvap, port.block,
                                                       self.uplink.SET_MASK)
+
+    @property
+    def group(self):
+        """Get the group."""
+
+        return self._group
+
+    @group.setter
+    def group(self, group):
+        """ Set the group. """
+
+        if self._group == group:
+            return
+
+        self._group = group
+        self.refresh_lvap()
 
     @property
     def encap(self):
@@ -464,6 +484,9 @@ class LVAP(object):
             downlink: A ResourcePool or a ResourceBlock
         """
 
+        if not blocks:
+            return
+
         if isinstance(blocks, ResourcePool):
             pool = blocks
         elif isinstance(blocks, ResourceBlock):
@@ -477,24 +500,6 @@ class LVAP(object):
 
         # set uplink blocks
         self.uplink = pool
-
-    @property
-    def port(self):
-        """Return the port on which this LVAP is scheduled. """
-
-        if not self.default_block:
-            return None
-
-        return self.downlink[self.default_block]
-
-    @port.setter
-    def port(self, value):
-        """Set the Port."""
-
-        if not self.default_block:
-            return None
-
-        self.downlink[self.default_block] = value
 
     @property
     def default_block(self):
@@ -522,14 +527,20 @@ class LVAP(object):
         if not self.default_block:
             return None
 
-        matching = wtp.supports & ResourcePool([self.default_block])
+        matching = wtp.supports & self.supported
         self.scheduled_on = matching.pop() if matching else None
 
     def clear_downlink(self):
         """ Clear all downlink blocks."""
 
+        # remove downlink
         for block in list(self._downlink.keys()):
             del self._downlink[block]
+
+        # remove intent
+        if self.poa_uuid:
+            intent_server = RUNTIME.components[IntentServer.__module__]
+            intent_server.remove_poa(self.poa_uuid)
 
     def clear_uplink(self):
         """ Clear all downlink blocks."""
@@ -543,12 +554,12 @@ class LVAP(object):
         return {'addr': self.addr,
                 'net_bssid': self.net_bssid,
                 'lvap_bssid': self.lvap_bssid,
-                'port': self.port,
                 'ports': self.ports,
                 'wtp': self.wtp,
                 'scheduled_on': self.scheduled_on,
                 'downlink': [k for k in self._downlink.keys()],
                 'uplink': [k for k in self._uplink.keys()],
+                'supported': self.supported,
                 'ssids': self.ssids,
                 'assoc_id': self.assoc_id,
                 'ssid': self.ssid,
