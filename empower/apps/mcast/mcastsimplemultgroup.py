@@ -299,7 +299,6 @@ class MCastMultigroup(EmpowerApp):
                 break
 
     def wtp_register(self, block):
-        print("AQUIIIIIIIIIIIIIIIIIIIIIIIIII")
         wtp_info = MCastWTPInfo()
         wtp_info.block = block
         wtp_info.prob_measurement[self.mcast_addr] = MCAST_EWMA_PROB
@@ -391,7 +390,7 @@ class MCastMultigroup(EmpowerApp):
         # If the old client was the only client in the wtp or there is not any client, lets have the basic rate
         if min_rate == sys.maxsize or min_rate == 0:
             for index, entry in enumerate(self.mcast_wtps):
-                if entry.block.hwaddr == hwaddr:
+                if entry.block.hwaddr == mcast_wtp.block.hwaddr:
                     min_rate = min(entry.block.supports)
                     min_highest_cur_prob_rate = min(entry.block.supports)
                     break
@@ -414,7 +413,6 @@ class MCastMultigroup(EmpowerApp):
     def to_dict(self):
         """Return JSON-serializable representation of the object."""
         out = super().to_dict()
-        handover_occupancies = {str(k): v for k, v in self.handover_occupancies.items()}
 
         out['mcast_clients'] = []
         for p in self.mcast_clients:
