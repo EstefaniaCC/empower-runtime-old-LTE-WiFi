@@ -162,8 +162,6 @@ class LVAPPConnection(object):
 
     def _trigger_message(self, msg_type):
 
-        #print("NEW MESSAGE TYPE 1", msg_type)
-
         if msg_type not in self.server.pt_types:
             #print("NEW MESSAGE TYPE 2", msg_type)
 
@@ -171,7 +169,6 @@ class LVAPPConnection(object):
             return
 
         if self.server.pt_types[msg_type]:
-            #print("NEW MESSAGE TYPE 3", msg_type)
 
             msg = self.server.pt_types[msg_type].parse(self.__buffer)
             addr = EtherAddress(msg.wtp)
@@ -185,12 +182,8 @@ class LVAPPConnection(object):
 
             handler_name = "_handle_%s" % self.server.pt_types[msg_type].name
 
-            #print("NEW MESSAGE TYPE 4 NAME %s" % (handler_name))
-
             if hasattr(self, handler_name):
-                #print("NEW MESSAGE TYPE 5 NAME %s" % (handler_name))
                 handler = getattr(self, handler_name)
-                #print(handler)
                 handler(wtp, msg)
 
         if msg_type in self.server.pt_types_handlers:
