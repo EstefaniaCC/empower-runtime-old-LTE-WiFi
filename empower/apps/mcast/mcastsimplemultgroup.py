@@ -86,6 +86,7 @@ class MCastMultigroup(EmpowerApp):
         self.wtpdown(callback=self.wtp_down_callback)
 
         self.incom_mcast_addr(callback=self.incom_mcast_addr_callback)
+        self.igmp_report(callback=self.igmp_report_callback)
 
         
 
@@ -133,8 +134,6 @@ class MCastMultigroup(EmpowerApp):
         
         wtp = RUNTIME.tenants[self.tenant.tenant_id].wtps[request.wtp]
 
-        print(wtp.supports)
-
         for block in wtp.supports:
             if any(entry.block.hwaddr == block.hwaddr for entry in self.mcast_wtps):
                 continue
@@ -151,7 +150,18 @@ class MCastMultigroup(EmpowerApp):
                     print(type(entryS.supports))
                     tx_policy.mcs = [min(list(entryS.supports))]
                     break
-        
+
+    def igmp_report_callback(self, request):
+        self.log.info("APP LEVEL, IGMP REPORT type %d for %s multicast address FROM %s station in WTP %s", 
+            request.igmp_type, request.mcast_addr, request.sta, request.wtp)
+
+        if request.wtp not in RUNTIME.tenants[self.tenant.tenant_id].wtps:
+            return
+        if request.sta not in RUNTIME.lvaps:
+            return
+
+        wtp = RUNTIME.tenants[self.tenant.tenant_id].wtps[request.wtp]
+        lvap = RUNTIME.lvaps[request.sta]
 
     def txp_bin_counter_callback(self, counter):
         """Counters callback."""

@@ -19,6 +19,7 @@
 
 import time
 import tornado.ioloop
+import ipaddress
 
 from construct import Container
 
@@ -49,6 +50,8 @@ from empower.lvapp import PT_INCOM_MCAST_REQUEST
 from empower.lvapp import INCOM_MCAST_REQUEST
 from empower.lvapp import PT_INCOM_MCAST_RESPONSE
 from empower.lvapp import INCOM_MCAST_RESPONSE
+from empower.lvapp import PT_IGMP_REPORT
+from empower.lvapp import IGMP_REPORT
 from empower.core.lvap import LVAP
 from empower.core.networkport import NetworkPort
 from empower.core.vap import VAP
@@ -57,6 +60,8 @@ from empower.lvapp import ADD_VAP
 from empower.core.tenant import T_TYPE_SHARED
 from empower.core.tenant import T_TYPE_UNIQUE
 from empower.core.utils import generate_bssid
+from empower.core.utils import multicast_ip_to_ether
+from empower.core.utils import verify_multicast_address
 
 from empower.main import RUNTIME
 
@@ -980,7 +985,7 @@ class LVAPPConnection(object):
         self.send_register_incomming_mcast_address_message_to_self(request)
 
     def send_register_incomming_mcast_address_message_to_self(self, request):
-        """Send a unsollicited INCOM_MCAST_REQUEST message to self."""
+        """Send a unsolicited INCOM_MCAST_REQUEST message to self."""
 
         for handler in self.server.pt_types_handlers[PT_INCOM_MCAST_REQUEST]:
             print("send_register_incomming_mcast_address_message_to_self")
@@ -1003,3 +1008,46 @@ class LVAPPConnection(object):
         msg = INCOM_MCAST_RESPONSE.build(response)
         LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.stream.write(msg)
+
+    def _handle_igmp_report(self, wtp, request):
+        """Handle an incoming IGMP_REPORT message.
+        Args:
+            request, a IGMP_REPORT message
+        Returns:
+            None
+        """
+
+        if not wtp.connection:
+            LOG.info("IGMP report from disconnected WTP %s", wtp.addr)
+            return
+
+        sta = EtherAddress(request.sta)
+
+        if sta not in RUNTIME.lvaps:
+            LOG.info("IGMP report from unknown LVAP %s", sta)
+            return
+
+        lvap = RUNTIME.lvaps[sta]
+        ip_mcast_addr = ipaddress.ip_address(request.mcast_addr)
+
+        LOG.info("IGMP report from %s WTP %s seq %u. Sta %s is requesting %d IGMP type for %s multicast address", 
+            self.addr[0], wtp.addr, request.seq, sta, request.igmp_type, ip_mcast_addr)
+
+        if not verify_multicast_address(ip_mcast_addr):
+            return
+
+        mcast_addr = multicast_ip_to_ether(ip_mcast_addr)
+        if not mcast_addr:
+            LOG.info("Unknown mcast addr from wtp %s. Received IP address %s", wtp.addr, request.mcast_addr)
+            return
+
+        LOG.info("Sending register IGMP  %d type REQUEST for %s multicast_address  from %s sta in wtp %s to self " %(request.igmp_type, mcast_addr, sta, wtp.addr))
+
+        self.send_register_igmp_report_message_to_self(request)
+
+    def send_register_igmp_report_message_to_self(self, request):
+        """Send a unsolicited IGMP_REPORT_REQUEST message to self."""
+
+        for handler in self.server.pt_types_handlers[PT_IGMP_REPORT]:
+            print("send_register_igmp_report_message_to_self")
+            handler(request)

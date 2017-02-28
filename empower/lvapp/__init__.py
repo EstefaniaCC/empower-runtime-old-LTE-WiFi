@@ -56,6 +56,8 @@ PT_STATUS_VAP = 0x33
 PT_INCOM_MCAST_REQUEST = 0x38
 PT_INCOM_MCAST_RESPONSE = 0x39
 
+PT_IGMP_REPORT = 0x43
+
 HEADER = Struct("header", UBInt8("version"),
                 UBInt8("type"),
                 UBInt32("length"))
@@ -258,6 +260,15 @@ INCOM_MCAST_RESPONSE = Struct("incom_mcast_addr_response", UBInt8("version"),
                     Bytes("mcast_addr", 6),
                     UBInt8("iface"))
 
+IGMP_REPORT = Struct("igmp_report", UBInt8("version"),
+                    UBInt8("type"),
+                    UBInt32("length"),
+                    UBInt32("seq"),
+                    Bytes("wtp", 6),
+                    Bytes("sta", 6),
+                    Bytes("mcast_addr", 4),
+                    UBInt8("igmp_type"))
+
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
             PT_LVAP_JOIN: None,
@@ -277,7 +288,8 @@ PT_TYPES = {PT_BYE: None,
             PT_STATUS_PORT: STATUS_PORT,
             PT_STATUS_VAP: STATUS_VAP,
             PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
-            PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE}
+            PT_INCOM_MCAST_RESPONSE: INCOM_MCAST_RESPONSE,
+            PT_IGMP_REPORT: IGMP_REPORT}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -298,4 +310,5 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_STATUS_PORT: [],
                      PT_STATUS_VAP: [],
                      PT_INCOM_MCAST_REQUEST: [],
-                     PT_INCOM_MCAST_RESPONSE: []}
+                     PT_INCOM_MCAST_RESPONSE: [],
+                     PT_IGMP_REPORT: []}

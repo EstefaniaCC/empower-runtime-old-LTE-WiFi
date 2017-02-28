@@ -58,6 +58,7 @@ if __name__ == "__main__":
              'lvnf_ems.lvnf_get',
              'lvnf_ems.lvnf_set',
              'lvnf_stats.lvnf_stats',
-             'incom_mcast_addr.incom_mcast_addr']
+             'incom_mcast_addr.incom_mcast_addr',
+             'igmp_report.igmp_report']
 
     main(ARGVS)
