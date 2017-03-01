@@ -52,46 +52,10 @@ V2_LEAVE_GROUP = 0x7
 V1_MEMBERSHIP_REPORT = 0x8
 V1_V2_MEMBERSHIP_QUERY = 0x9
 
-V3_MODE_IS_INCLUDE_H = 'v3 include'
-V3_MODE_IS_EXCLUDE_H = 'v3 exclude'
-V3_CHANGE_TO_INCLUDE_MODE_H = 'v3 change to include'
-V3_CHANGE_TO_EXCLUDE_MODE_H = 'v3 change to exclude'
-V3_ALLOW_NEW_SOURCES_H = 'v3 allow new sources'
-V3_BLOCK_OLD_SOURCES_H = 'v3 block old sources'
-V2_JOIN_GROUP_H = 'v2 join group'
-V2_LEAVE_GROUP_H = 'v2 leave group'
-V1_MEMBERSHIP_REPORT_H = 'v1 report'
-V1_V2_MEMBERSHIP_QUERY_H = 'v1 v2 query'
-
-
-IGMP_TYPES = {V3_MODE_IS_INCLUDE: V3_MODE_IS_INCLUDE_H,
-            V3_MODE_IS_EXCLUDE: V3_MODE_IS_EXCLUDE_H,
-            V3_CHANGE_TO_INCLUDE_MODE: V3_CHANGE_TO_INCLUDE_MODE_H,
-            V3_CHANGE_TO_EXCLUDE_MODE: V3_CHANGE_TO_EXCLUDE_MODE_H,
-            V3_ALLOW_NEW_SOURCES: V3_ALLOW_NEW_SOURCES_H,
-            V3_BLOCK_OLD_SOURCES: V3_BLOCK_OLD_SOURCES_H,
-            V2_JOIN_GROUP: V2_JOIN_GROUP_H,
-            V2_LEAVE_GROUP: V2_LEAVE_GROUP_H,
-            V1_MEMBERSHIP_REPORT: V1_MEMBERSHIP_REPORT_H,
-            V1_V2_MEMBERSHIP_QUERY: V1_V2_MEMBERSHIP_QUERY_H}
-
-REVERSE_IGMP_TYPES = {V3_MODE_IS_INCLUDE_H: V3_MODE_IS_INCLUDE,
-            V3_MODE_IS_EXCLUDE_H: V3_MODE_IS_EXCLUDE,
-            V3_CHANGE_TO_INCLUDE_MODE_H: V3_CHANGE_TO_INCLUDE_MODE,
-            V3_CHANGE_TO_EXCLUDE_MODE_H: V3_CHANGE_TO_EXCLUDE_MODE,
-            V3_ALLOW_NEW_SOURCES_H: V3_ALLOW_NEW_SOURCES,
-            V3_BLOCK_OLD_SOURCES_H: V3_BLOCK_OLD_SOURCES,
-            V2_JOIN_GROUP_H: V2_JOIN_GROUP,
-            V2_LEAVE_GROUP_H: V2_LEAVE_GROUP,
-            V1_MEMBERSHIP_REPORT_H: V1_MEMBERSHIP_REPORT,
-            V1_V2_MEMBERSHIP_QUERY_H: V1_V2_MEMBERSHIP_QUERY}
-
-
 class IgmpReport(ModuleTrigger):
     """igmp_report worker."""
 
     MODULE_NAME = "igmp_report"
-    # REQUIRED = ['module_type', 'worker', 'tenant_id', 'block']
 
     def __init__(self):
 
@@ -100,8 +64,6 @@ class IgmpReport(ModuleTrigger):
         # parameters
         self._mcast_addr = None
         self._wtp = None
-        # self._block = None
-        #self._iface = None
         self.sta = None
         self.mcast_addr = None
         self.igmp_type = None
@@ -112,52 +74,6 @@ class IgmpReport(ModuleTrigger):
         return super().__eq__(other) and \
             self.mcast_addr == other.mcast_addr and \
             self.wtp == other.wtp and self.sta == other.sta and self.igmp_type == other.igmp_type
-            #and self.iface == other.iface
-
-    # @property
-    # def block(self):
-    #     """Return block."""
-
-    #     return self._block
-
-    # @block.setter
-    # def block(self, value):
-    #     """Set block."""
-
-    #     if isinstance(value, ResourceBlock):
-
-    #         self._block = value
-
-    #     elif isinstance(value, dict):
-
-    #         if 'hwaddr' not in value:
-    #             raise ValueError("Missing field: hwaddr")
-
-    #         if 'channel' not in value:
-    #             raise ValueError("Missing field: channel")
-
-    #         if 'band' not in value:
-    #             raise ValueError("Missing field: band")
-
-    #         if 'wtp' not in value:
-    #             raise ValueError("Missing field: wtp")
-
-    #         wtp = RUNTIME.wtps[EtherAddress(value['wtp'])]
-
-    #         incoming = ResourcePool()
-    #         block = ResourceBlock(wtp, EtherAddress(value['hwaddr']),
-    #                               int(value['channel']), int(value['band']))
-    #         incoming.add(block)
-
-    #         match = wtp.supports & incoming
-
-    #         if not match:
-    #             raise ValueError("No block specified")
-
-    #         if len(match) > 1:
-    #             raise ValueError("More than one block specified")
-
-    #         self._block = match.pop()
 
     @property
     def mcast_addr(self):
@@ -176,19 +92,6 @@ class IgmpReport(ModuleTrigger):
         mac_addr = multicast_ip_to_ether(ip_addr)
 
         self._mcast_addr = mac_addr
-
-
-    # @property
-    # def iface(self):
-    #     """Return the iface."""
-
-    #     return self._iface
-
-    # @iface.setter
-    # def iface(self, value):
-    #     """Set the iface."""
-
-    #     self._iface = value
 
     @property
     def wtp(self):
@@ -225,10 +128,8 @@ class IgmpReport(ModuleTrigger):
 
         out['wtp'] = self.wtp
         out['sta'] = self.sta
-        #out['block'] = self.block
         out['mcast_addr'] = self.mcast_addr
         out['igmp_type'] = self.igmp_type
-        #out['iface'] = self.iface
 
         return out
 
@@ -245,8 +146,6 @@ class IgmpReport(ModuleTrigger):
         self.sta = request.sta
         self.mcast_addr = request.mcast_addr
         self.igmp_type = request.igmp_type
-        #self.iface = request.iface
-        #self.block = request.block
         self.handle_callback(self)
 
 

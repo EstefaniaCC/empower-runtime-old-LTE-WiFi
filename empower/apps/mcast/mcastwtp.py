@@ -55,13 +55,14 @@ class MCastWTPInfo(object):
         self.__last_rssi_change = 0
         self.__last_prob_update = 0
         self.__attached_clients = 0
-        self.__mode = None
+        self.__mode = dict()  # {dest_addr:mode, dst_addr:mode...} (mode refers to DMS, LEGACY...)
         self.__dms_max_period = 1
         self.__legacy_max_period = 3
         self.__current_period = 0
         self.__attached_clients_rssi = dict()
         self.__avg_perceived_rssi = 0
         self.__dev_perceived_rssi = 0
+        self.__managed_mcast_addresses = list()
 
     
     @property
@@ -244,6 +245,16 @@ class MCastWTPInfo(object):
 
         self.__dev_perceived_rssi = dev_perceived_rssi
 
+    @property
+    def managed_mcast_addresses(self):
+        """Return the multicast addresses managed by this wtp."""
+        return self.__managed_mcast_addresses
+
+    @managed_mcast_addresses.setter
+    def managed_mcast_addresses(self, managed_mcast_addresses):
+
+        self.__managed_mcast_addresses = managed_mcast_addresses
+
 
     def to_dict(self):
         """Return JSON-serializable representation of the object."""
@@ -257,6 +268,7 @@ class MCastWTPInfo(object):
         cur_prob_rate = {str(k): v for k, v in self.cur_prob_rate.items()}
         prob_measurement = {str(k): v for k, v in self.prob_measurement.items()}
         attached_clients_rssi = {str(k): v for k, v in self.attached_clients_rssi.items()}
+        mode = {str(k): v for k, v in self.mode.items()}
 
         params['block'] = self.block.hwaddr
         params['last_txp_bin_tx_pkts_counter'] = last_txp_bin_tx_pkts_counter
@@ -270,9 +282,10 @@ class MCastWTPInfo(object):
         params['attached_clients'] = self.attached_clients
         params['attached_clients_rssi'] = attached_clients_rssi
         params['last_prob_update'] = json.dumps(datetime.datetime.fromtimestamp(self.last_prob_update), cls=JSONEncoder)
-        params['mode'] = self.mode
+        params['mode'] = mode
         params['avg_perceived_rssi'] = self.avg_perceived_rssi
         params['dev_perceived_rssi'] = self.dev_perceived_rssi
+        params['managed_mcast_addresses'] = self.managed_mcast_addresses
 
         return params
 

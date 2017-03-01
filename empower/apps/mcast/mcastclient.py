@@ -53,6 +53,7 @@ class MCastClientInfo(object):
 		self.__highest_cur_prob_rate = 0
 		self.__last_unsuccessful_handover = dict()
 		self.__last_handover_time = None
+		self.__multicast_services = list()
 
 	@property
 	def addr(self):
@@ -163,6 +164,15 @@ class MCastClientInfo(object):
 	def last_handover_time(self, last_handover_time):
 		self.__last_handover_time = last_handover_time
 
+	@property
+	def multicast_services(self):
+		"""Return the addresses being used by this client."""
+		return self.__multicast_services
+
+	@multicast_services.setter
+	def multicast_services(self, multicast_services):
+		self.__multicast_services = multicast_services
+
 
 	def to_dict(self):
 		"""Return JSON-serializable representation of the object."""
@@ -184,5 +194,6 @@ class MCastClientInfo(object):
 		params['highest_cur_prob_rate'] = self.highest_cur_prob_rate
 		params['last_unsuccessful_handover'] = last_unsuccessful_handover
 		params['last_handover_time'] = self.last_handover_time
+		params['multicast_services'] = self.multicast_services
 
 		return params

@@ -980,7 +980,6 @@ class LVAPPConnection(object):
             LOG.info("Unknown mcast addr from wtp %s", wtp)
             return
 
-        LOG.info("Sending register incoming mcast address %s REQUEST from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.send_incom_mcast_addr_response(mcast_addr, wtp, iface)
         self.send_register_incomming_mcast_address_message_to_self(request)
 
@@ -988,7 +987,6 @@ class LVAPPConnection(object):
         """Send a unsolicited INCOM_MCAST_REQUEST message to self."""
 
         for handler in self.server.pt_types_handlers[PT_INCOM_MCAST_REQUEST]:
-            print("send_register_incomming_mcast_address_message_to_self")
             handler(request)
 
     def send_incom_mcast_addr_response(self, mcast_addr, wtp, iface):
@@ -1006,7 +1004,6 @@ class LVAPPConnection(object):
                              iface=iface)
 
         msg = INCOM_MCAST_RESPONSE.build(response)
-        LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.stream.write(msg)
 
     def _handle_igmp_report(self, wtp, request):
@@ -1030,9 +1027,6 @@ class LVAPPConnection(object):
         lvap = RUNTIME.lvaps[sta]
         ip_mcast_addr = ipaddress.ip_address(request.mcast_addr)
 
-        LOG.info("IGMP report from %s WTP %s seq %u. Sta %s is requesting %d IGMP type for %s multicast address", 
-            self.addr[0], wtp.addr, request.seq, sta, request.igmp_type, ip_mcast_addr)
-
         if not verify_multicast_address(ip_mcast_addr):
             return
 
@@ -1041,7 +1035,8 @@ class LVAPPConnection(object):
             LOG.info("Unknown mcast addr from wtp %s. Received IP address %s", wtp.addr, request.mcast_addr)
             return
 
-        LOG.info("Sending register IGMP  %d type REQUEST for %s multicast_address  from %s sta in wtp %s to self " %(request.igmp_type, mcast_addr, sta, wtp.addr))
+        LOG.info("IGMP report from %s WTP %s seq %u. Sta %s is requesting %d IGMP type for %s - %s multicast address", 
+            self.addr[0], wtp.addr, request.seq, sta, request.igmp_type, ip_mcast_addr, mcast_addr)
 
         self.send_register_igmp_report_message_to_self(request)
 
@@ -1049,5 +1044,4 @@ class LVAPPConnection(object):
         """Send a unsolicited IGMP_REPORT_REQUEST message to self."""
 
         for handler in self.server.pt_types_handlers[PT_IGMP_REPORT]:
-            print("send_register_igmp_report_message_to_self")
             handler(request)

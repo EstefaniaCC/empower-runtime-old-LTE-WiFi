@@ -47,6 +47,17 @@ from empower.apps.mcast.mcastwtp import MCastWTPInfo
 from empower.apps.mcast.mcastclient import MCastClientInfo
 from empower.main import RUNTIME
 
+from empower.igmp_report.igmp_report import V3_MODE_IS_INCLUDE
+from empower.igmp_report.igmp_report import V3_MODE_IS_EXCLUDE
+from empower.igmp_report.igmp_report import V3_CHANGE_TO_INCLUDE_MODE
+from empower.igmp_report.igmp_report import V3_CHANGE_TO_EXCLUDE_MODE
+from empower.igmp_report.igmp_report import V3_ALLOW_NEW_SOURCES
+from empower.igmp_report.igmp_report import V3_BLOCK_OLD_SOURCES
+from empower.igmp_report.igmp_report import V2_JOIN_GROUP
+from empower.igmp_report.igmp_report import V2_LEAVE_GROUP
+from empower.igmp_report.igmp_report import V1_MEMBERSHIP_REPORT
+from empower.igmp_report.igmp_report import V1_V2_MEMBERSHIP_QUERY
+
 import empower.logger
 LOG = empower.logger.get_logger()
 
@@ -73,10 +84,9 @@ class MCastMultigroup(EmpowerApp):
     def __init__(self, **kwargs):
 
         EmpowerApp.__init__(self, **kwargs)
-        self.__mcast_clients = []
-        self.__mcast_wtps = [] 
+        self.__mcast_clients = list()
+        self.__mcast_wtps = list()
         self.__prob_thershold = 95
-        self.__mcast_addr = EtherAddress("01:00:5e:00:00:fb")
 
         # Register an lvap join event
         self.lvapjoin(callback=self.lvap_join_callback)
@@ -86,9 +96,18 @@ class MCastMultigroup(EmpowerApp):
         self.wtpdown(callback=self.wtp_down_callback)
 
         self.incom_mcast_addr(callback=self.incom_mcast_addr_callback)
-        self.igmp_report(callback=self.igmp_report_callback)
 
-        
+        self.empower_igmp_record_type = { V3_MODE_IS_INCLUDE : self.mcast_addr_unregister,
+            V3_MODE_IS_EXCLUDE : self.mcast_addr_register,
+            V3_CHANGE_TO_INCLUDE_MODE : self.mcast_addr_unregister,
+            V3_CHANGE_TO_EXCLUDE_MODE : self.mcast_addr_register,
+            V3_ALLOW_NEW_SOURCES : self.mcast_addr_query,
+            V3_BLOCK_OLD_SOURCES : self.mcast_addr_query,
+            V2_JOIN_GROUP : self.mcast_addr_register,
+            V2_LEAVE_GROUP : self.mcast_addr_unregister,
+            V1_MEMBERSHIP_REPORT : self.mcast_addr_register,
+            V1_V2_MEMBERSHIP_QUERY : self.mcast_addr_query
+        }
 
     @property
     def mcast_clients(self):
@@ -117,42 +136,17 @@ class MCastMultigroup(EmpowerApp):
     def prob_thershold(self, prob_thershold):
         self.__prob_thershold = prob_thershold
 
-    @property
-    def mcast_addr(self):
-        """Return mcast_addr used."""
-        return self.__mcast_addr
-
-    @mcast_addr.setter
-    def mcast_addr(self, mcast_addr):
-        self.__mcast_addr = mcast_addr
-
     def incom_mcast_addr_callback(self, request):
-        self.log.info("APP LEVEL, INCOMING MCAST ADDRESS %s FROM WTP %s", request.mcast_addr, request.wtp)
+        self.log.info("APP LEVEL, INCOMING MCAST ADDRESS %s from WTP %s", request.mcast_addr, request.wtp)
 
         if request.wtp not in RUNTIME.tenants[self.tenant.tenant_id].wtps:
             return
         
         wtp = RUNTIME.tenants[self.tenant.tenant_id].wtps[request.wtp]
-
-        for block in wtp.supports:
-            if any(entry.block.hwaddr == block.hwaddr for entry in self.mcast_wtps):
-                continue
-            self.wtp_register(block)
-
-        for index, entry in enumerate(self.mcast_wtps):
-            print(entry) 
-
-        for index, entry in enumerate(self.mcast_wtps):
-            for indexS, entryS in enumerate(wtp.supports):
-                if entry.block.hwaddr == entryS.hwaddr:
-                    tx_policy = entry.block.tx_policies[request.mcast_addr]
-                    tx_policy.mcast = TX_MCAST_LEGACY
-                    print(type(entryS.supports))
-                    tx_policy.mcs = [min(list(entryS.supports))]
-                    break
+        self.mcast_addr_register(None, request.mcast_addr, wtp)
 
     def igmp_report_callback(self, request):
-        self.log.info("APP LEVEL, IGMP REPORT type %d for %s multicast address FROM %s station in WTP %s", 
+        self.log.info("APP LEVEL, IGMP REPORT type %d for %s multicast address from %s station in WTP %s", 
             request.igmp_type, request.mcast_addr, request.sta, request.wtp)
 
         if request.wtp not in RUNTIME.tenants[self.tenant.tenant_id].wtps:
@@ -162,6 +156,10 @@ class MCastMultigroup(EmpowerApp):
 
         wtp = RUNTIME.tenants[self.tenant.tenant_id].wtps[request.wtp]
         lvap = RUNTIME.lvaps[request.sta]
+
+        if request.igmp_type not in self.empower_igmp_record_type:
+            return
+        self.empower_igmp_record_type[request.igmp_type](lvap.addr, request.mcast_addr, wtp)
 
     def txp_bin_counter_callback(self, counter):
         """Counters callback."""
@@ -200,7 +198,6 @@ class MCastMultigroup(EmpowerApp):
                     del self.mcast_wtps[index]
                     break
 
-
     def lvap_join_callback(self, lvap):
         """ New LVAP. """
 
@@ -208,6 +205,7 @@ class MCastMultigroup(EmpowerApp):
             return
 
         lvap.lvap_stats(every=self.every, callback=self.lvap_stats_callback)
+        self.igmp_report(callback=self.igmp_report_callback)
 
         default_block = next(iter(lvap.downlink))
         lvap_info = MCastClientInfo()
@@ -225,10 +223,12 @@ class MCastMultigroup(EmpowerApp):
         """Called when an LVAP disassociates from a tennant."""
 
         default_block = next(iter(lvap.downlink))
+        mcast_addresses_in_use = list()
 
         for index, entry in enumerate(self.mcast_clients):
             if entry.addr == lvap.addr:
                 del self.mcast_clients[index]
+                mcast_addresses_in_use = entry.multicast_services
                 break
 
         for index, entry in enumerate(self.mcast_wtps):
@@ -237,23 +237,26 @@ class MCastMultigroup(EmpowerApp):
                 if entry.attached_clients == 0:
                     return
                 # In case that this was not the only client attached to this WTP, the rate must be recomputed. 
-                tx_policy = entry.block.tx_policies[self.mcast_addr]
-                ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry)
-                tx_policy.mcast = TX_MCAST_LEGACY
-                if entry.prob_measurement[self.mcast_addr] == MCAST_EWMA_PROB:
-                    tx_policy.mcs = [int(ewma_rate)]
-                elif entry.prob_measurement[self.mcast_addr] == MCAST_CUR_PROB:
-                    tx_policy.mcs = [int(cur_prob_rate)]
-                entry.rate[self.mcast_addr] = ewma_rate
-                entry.cur_prob_rate[self.mcast_addr] = cur_prob_rate
-                entry.mode = TX_MCAST_LEGACY_H
+                if not mcast_addresses_in_use:
+                    return
+                for i, addr in enumerate(mcast_addresses_in_use):
+                    tx_policy = entry.block.tx_policies[addr]
+                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
+                    tx_policy.mcast = TX_MCAST_LEGACY
+                    if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
+                        tx_policy.mcs = [int(ewma_rate)]
+                    elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
+                        tx_policy.mcs = [int(cur_prob_rate)]
+                    entry.rate[addr] = ewma_rate
+                    entry.cur_prob_rate[addr] = cur_prob_rate
+                    entry.mode[addr] = TX_MCAST_LEGACY_H
+                    break
                 break
-
 
     def lvap_stats_callback(self, counter):
         """ New stats available. """
 
-        rates = (counter.to_dict())["rates"] 
+        rates = (counter.to_dict())["rates"]
         if not rates or counter.lvap not in RUNTIME.lvaps:
             return
 
@@ -308,46 +311,85 @@ class MCastMultigroup(EmpowerApp):
                 entry.higher_thershold_cur_prob_rates = higher_thershold_cur_prob_rates
                 break
 
+        def mcast_addr_register(self, sta, mcast_addr, wtp):
+        for block in wtp.supports:
+            for entry in self.mcast_wtps:
+                if entry.block.hwaddr == block.hwaddr and mcast_addr not in entry.managed_mcast_addresses:
+                    tx_policy = entry.block.tx_policies[mcast_addr]
+                    tx_policy.mcast = TX_MCAST_LEGACY
+                    tx_policy.mcs = [min(list(block.supports))]
+                    entry.prob_measurement[mcast_addr] = MCAST_EWMA_PROB
+                    entry.mode[mcast_addr] = TX_MCAST_LEGACY
+                    entry.managed_mcast_addresses.append(mcast_addr)
+                    self.txp_bin_counter(block=entry.block,
+                        mcast=mcast_addr,
+                        callback=self.txp_bin_counter_callback,
+                        every=1000)
+                    break
+
+        for index, entry in enumerate(self.mcast_clients):
+            if sta is not None and entry.addr == sta and mcast_addr not in entry.multicast_services:
+                entry.multicast_services.append(mcast_addr)
+                break
+
+    def mcast_addr_unregister(self, mcast_addr, sta, wtp):
+        addr_in_use = False
+
+        for index, entry in enumerate(self.mcast_clients):
+            if entry.addr == sta and mcast_addr in entry.multicast_services:
+                entry.multicast_services.remove(mcast_addr)
+            elif entry.addr != sta and mcast_addr in entry.multicast_services:
+                addr_in_use = True
+
+        for block in wtp.supports:
+            for entry in self.mcast_wtps:
+                if entry.block.hwaddr == block.hwaddr and mcast_addr in entry.managed_mcast_addresses and addr_in_use is False:
+                    entry.managed_mcast_addresses.remove(mcast_addr)
+                    del entry.mode[mcast_addr]
+                    del entry.rate[mcast_addr]
+                    del cur_prob_rate[mcast_addr]
+                    del entry.prob_measurement[mcast_addr]
+                    del last_tx_bytes[mcast_addr]
+                    del last_txp_bin_tx_bytes_counter[mcast_addr]
+                    del last_tx_pkts[mcast_addr]
+                    del last_txp_bin_tx_pkts_counter[mcast_addr]
+                    break
+
+    def mcast_addr_query(self, mcast_addr, sta, wtp):
+        pass
+
     def wtp_register(self, block):
         wtp_info = MCastWTPInfo()
         wtp_info.block = block
-        wtp_info.prob_measurement[self.mcast_addr] = MCAST_EWMA_PROB
-        wtp_info.mode = TX_MCAST_DMS_H
         self.mcast_wtps.append(wtp_info)
-
-        self.txp_bin_counter(block=block,
-            mcast=self.mcast_addr,
-            callback=self.txp_bin_counter_callback,
-            every=1000)
 
 
     def loop(self):
         """ Periodic job. """
         if not self.mcast_clients:
-            for index, entry in enumerate(self.mcast_wtps):
-                tx_policy = entry.block.tx_policies[self.mcast_addr]
-                tx_policy.mcast = TX_MCAST_DMS
-        else:
-            for index, entry in enumerate(self.mcast_wtps):
-                tx_policy = entry.block.tx_policies[self.mcast_addr] 
-
+            return
+        for index, entry in enumerate(self.mcast_wtps):
+            if not entry.managed_mcast_addresses:
+                continue
+            for i, addr in enumerate(entry.managed_mcast_addresses):
+                tx_policy = entry.block.tx_policies[addr] 
                 # If there is no clients, the default mode is DMS
                 # If there are many clients per AP, it combines DMS and legacy to obtain statistics. 
                 # If the AP is in DMS mode and the has been an update of the RSSI, the mode is changed to legacy.
                 if entry.attached_clients == 0 or \
-                (entry.mode == TX_MCAST_DMS_H and (entry.current_period % (entry.dms_max_period + entry.legacy_max_period)) < 1):
+                (entry.mode[addr] == TX_MCAST_DMS_H and (entry.current_period % (entry.dms_max_period + entry.legacy_max_period)) < 1):
                     tx_policy.mcast = TX_MCAST_DMS
-                    entry.mode = TX_MCAST_DMS_H
+                    entry.mode[addr] = TX_MCAST_DMS_H
                 else:
-                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry)
+                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
                     tx_policy.mcast = TX_MCAST_LEGACY
-                    if entry.prob_measurement[self.mcast_addr] == MCAST_EWMA_PROB:
+                    if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
                         tx_policy.mcs = [int(ewma_rate)]
-                    elif entry.prob_measurement[self.mcast_addr] == MCAST_CUR_PROB:
+                    elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
                         tx_policy.mcs = [int(cur_prob_rate)]
-                    entry.rate[self.mcast_addr] = ewma_rate
-                    entry.cur_prob_rate[self.mcast_addr] = cur_prob_rate
-                    entry.mode = TX_MCAST_LEGACY_H
+                    entry.rate[addr] = ewma_rate
+                    entry.cur_prob_rate[addr] = cur_prob_rate
+                    entry.mode[addr] = TX_MCAST_LEGACY_H
 
                     if (entry.current_period % (entry.dms_max_period + entry.legacy_max_period)) == entry.legacy_max_period:
                         entry.current_period = -1
@@ -356,7 +398,7 @@ class MCastMultigroup(EmpowerApp):
                     entry.current_period += 1
 
 
-    def calculate_wtp_rate(self, mcast_wtp):
+    def calculate_wtp_rate(self, mcast_wtp, addr):
         min_rate = best_rate = min_highest_cur_prob_rate = best_highest_cur_prob_rate = sys.maxsize
         thershold_intersection_list = []
         thershold_highest_cur_prob_rate_intersection_list = []
@@ -364,7 +406,7 @@ class MCastMultigroup(EmpowerApp):
         second_thershold_valid = True
 
         for index, entry in enumerate(self.mcast_clients):
-            if entry.attached_hwaddr == mcast_wtp.block.hwaddr:
+            if entry.attached_hwaddr == mcast_wtp.block.hwaddr and addr in entry.multicast_services:
                 # It looks for the lowest rate among all the receptors just in case in there is no valid intersection
                 # for the best rates of the clients (for both the ewma and cur probabilities). 
                 if entry.highest_rate < min_rate:
@@ -398,7 +440,7 @@ class MCastMultigroup(EmpowerApp):
                             second_thershold_valid = False
 
         # If the old client was the only client in the wtp or there is not any client, lets have the basic rate
-        if min_rate == sys.maxsize or min_rate == 0:
+        if min_rate == sys.maxsize:
             for index, entry in enumerate(self.mcast_wtps):
                 if entry.block.hwaddr == mcast_wtp.block.hwaddr:
                     min_rate = min(entry.block.supports)
@@ -430,7 +472,6 @@ class MCastMultigroup(EmpowerApp):
         out['mcast_wtps'] = []
         for p in self.mcast_wtps:
             out['mcast_wtps'].append(p.to_dict())
-        out['mcast_addr'] = self.mcast_addr
 
         return out                                  
 
