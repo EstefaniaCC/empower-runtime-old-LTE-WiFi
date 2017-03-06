@@ -64,9 +64,8 @@ class IgmpReport(ModuleTrigger):
         # parameters
         self._mcast_addr = None
         self._wtp = None
-        self.sta = None
-        self.mcast_addr = None
-        self.igmp_type = None
+        self._sta = None
+        self._igmp_type = None
 
 
     def __eq__(self, other):
