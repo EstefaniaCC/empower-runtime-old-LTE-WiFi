@@ -56,10 +56,12 @@ class MCastWTPInfo(object):
         self.__last_prob_update = 0
         self.__attached_clients = 0
         self.__mode = dict()  # {dest_addr:mode, dst_addr:mode...} (mode refers to DMS, LEGACY...)
-        self.__dms_max_period = 1
-        self.__legacy_max_period = 3
+        self.__dms_max_period = None
+        self.__legacy_max_period = None
+        self.__dms_starting_period = dict()
         self.__current_period = 0
-        self.__attached_clients_rssi = dict()
+        self.__next_period = 0
+        self.__attached_clients_rssi = dict() # {client:-45, client:-58...} 
         self.__avg_perceived_rssi = 0
         self.__dev_perceived_rssi = 0
         self.__managed_mcast_addresses = list()
@@ -94,6 +96,26 @@ class MCastWTPInfo(object):
     def current_period(self, current_period):
 
         self.__current_period = current_period
+
+    @property
+    def next_period(self):
+        """Return the next_period of the object."""
+        return self.__next_period
+
+    @next_period.setter
+    def next_period(self, next_period):
+
+        self.__next_period = next_period
+
+    @property
+    def dms_starting_period(self):
+        """Return the dms_starting_period of the object."""
+        return self.__dms_starting_period
+
+    @dms_starting_period.setter
+    def dms_starting_period(self, dms_starting_period):
+
+        self.__dms_starting_period = dms_starting_period
 
     @property
     def last_prob_update(self):
@@ -255,7 +277,6 @@ class MCastWTPInfo(object):
 
         self.__managed_mcast_addresses = managed_mcast_addresses
 
-
     def to_dict(self):
         """Return JSON-serializable representation of the object."""
 
@@ -269,6 +290,7 @@ class MCastWTPInfo(object):
         prob_measurement = {str(k): v for k, v in self.prob_measurement.items()}
         attached_clients_rssi = {str(k): v for k, v in self.attached_clients_rssi.items()}
         mode = {str(k): v for k, v in self.mode.items()}
+        dms_starting_period = {str(k): v for k, v in self.dms_starting_period.items()}
 
         params['block'] = self.block.hwaddr
         params['last_txp_bin_tx_pkts_counter'] = last_txp_bin_tx_pkts_counter
@@ -286,6 +308,11 @@ class MCastWTPInfo(object):
         params['avg_perceived_rssi'] = self.avg_perceived_rssi
         params['dev_perceived_rssi'] = self.dev_perceived_rssi
         params['managed_mcast_addresses'] = self.managed_mcast_addresses
+        params['current_period'] = self.current_period
+        params['next_period'] = self.next_period
+        params['dms_max_period'] = self.dms_max_period
+        params['legacy_max_period'] = self.legacy_max_period
+        params['dms_starting_period'] = dms_starting_period
 
         return params
 

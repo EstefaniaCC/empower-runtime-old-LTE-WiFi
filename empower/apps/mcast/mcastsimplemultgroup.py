@@ -33,6 +33,7 @@ import time
 import datetime
 import sys
 import statistics
+import math
 
 from empower.core.app import EmpowerApp
 from empower.core.resourcepool import TX_MCAST
@@ -87,15 +88,19 @@ class MCastMultigroup(EmpowerApp):
         self.__mcast_clients = list()
         self.__mcast_wtps = list()
         self.__prob_thershold = 95
+        self.__every = 50
+        self.__period_length = 2000
+        self.__dms_min_length = 200
+        self.__dms_max_length = 500
 
         # Register an lvap join event
-        self.lvapjoin(callback=self.lvap_join_callback)
-        self.lvapleave(callback=self.lvap_leave_callback)
+        self.lvapjoin(every=500, callback=self.lvap_join_callback)
+        self.lvapleave(every=500,callback=self.lvap_leave_callback)
         # Register an wtp up event
-        self.wtpup(callback=self.wtp_up_callback)
-        self.wtpdown(callback=self.wtp_down_callback)
+        self.wtpup(every=500, callback=self.wtp_up_callback)
+        self.wtpdown(every=500,callback=self.wtp_down_callback)
 
-        self.incom_mcast_addr(callback=self.incom_mcast_addr_callback)
+        self.incom_mcast_addr(every=500, callback=self.incom_mcast_addr_callback)
 
         self.empower_igmp_record_type = { V3_MODE_IS_INCLUDE : self.mcast_addr_unregister,
             V3_MODE_IS_EXCLUDE : self.mcast_addr_register,
@@ -136,18 +141,59 @@ class MCastMultigroup(EmpowerApp):
     def prob_thershold(self, prob_thershold):
         self.__prob_thershold = prob_thershold
 
+    @property
+    def every(self):
+        """Return every period: the loop method is called every "every" ms."""
+        return self.__every
+
+    @every.setter
+    def every(self, every):
+        self.__every = every
+
+    @property
+    def period_length(self):
+        """Return the total amount of time considering both dms and legacy policies."""
+        return self.__period_length
+
+    @period_length.setter
+    def period_length(self, period_length):
+        self.__period_length = period_length
+
+    @property
+    def dms_min_length(self):
+        """Return the minimum duration for the DMS period."""
+        return self.__dms_min_length
+
+    @dms_min_length.setter
+    def dms_min_length(self, dms_min_length):
+        self.__dms_min_length = dms_min_length
+
+    @property
+    def dms_max_length(self):
+        """Return the maximum duration for the DMS period according to the period length."""
+        return self.__dms_max_length
+
+    @dms_max_length.setter
+    def dms_max_length(self, dms_max_length):
+        self.__dms_max_length = dms_max_length
+
     def incom_mcast_addr_callback(self, request):
-        self.log.info("APP LEVEL, INCOMING MCAST ADDRESS %s from WTP %s", request.mcast_addr, request.wtp)
+        #self.log.info("New multicast address %s from WTP %s", request.mcast_addr, request.wtp)
 
         if request.wtp not in RUNTIME.tenants[self.tenant.tenant_id].wtps:
             return
-        
         wtp = RUNTIME.tenants[self.tenant.tenant_id].wtps[request.wtp]
+
+        for block in wtp.supports:
+            if any(entry.block.hwaddr == block.hwaddr for entry in self.mcast_wtps):
+                continue
+            self.wtp_register(block)
+
         self.mcast_addr_register(None, request.mcast_addr, wtp)
 
     def igmp_report_callback(self, request):
-        self.log.info("APP LEVEL, IGMP REPORT type %d for %s multicast address from %s station in WTP %s", 
-            request.igmp_type, request.mcast_addr, request.sta, request.wtp)
+        # self.log.info("IGMP report type %d for multicast address %s from %s in WTP %s", 
+        #     request.igmp_type, request.mcast_addr, request.sta, request.wtp)
 
         if request.wtp not in RUNTIME.tenants[self.tenant.tenant_id].wtps:
             return
@@ -164,8 +210,8 @@ class MCastMultigroup(EmpowerApp):
     def txp_bin_counter_callback(self, counter):
         """Counters callback."""
 
-        self.log.info("Mcast address %s packets %u bytes %u", counter.mcast,
-                      counter.tx_packets[0], counter.tx_bytes[0])
+        # self.log.info("Mcast address %s packets %u bytes %u", counter.mcast,
+        #               counter.tx_packets[0], counter.tx_bytes[0])
 
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == counter.block.hwaddr:
@@ -204,8 +250,8 @@ class MCastMultigroup(EmpowerApp):
         if any(lvap.addr == entry.addr for entry in self.mcast_clients):
             return
 
-        lvap.lvap_stats(every=self.every, callback=self.lvap_stats_callback)
-        self.igmp_report(callback=self.igmp_report_callback)
+        lvap.lvap_stats(every=500, callback=self.lvap_stats_callback)
+        self.igmp_report(every=500, callback=self.igmp_report_callback)
 
         default_block = next(iter(lvap.downlink))
         lvap_info = MCastClientInfo()
@@ -311,28 +357,52 @@ class MCastMultigroup(EmpowerApp):
                 entry.higher_thershold_cur_prob_rates = higher_thershold_cur_prob_rates
                 break
 
-        def mcast_addr_register(self, sta, mcast_addr, wtp):
+    def mcast_addr_register(self, sta, mcast_addr, wtp):
         for block in wtp.supports:
-            for entry in self.mcast_wtps:
-                if entry.block.hwaddr == block.hwaddr and mcast_addr not in entry.managed_mcast_addresses:
-                    tx_policy = entry.block.tx_policies[mcast_addr]
-                    tx_policy.mcast = TX_MCAST_LEGACY
-                    tx_policy.mcs = [min(list(block.supports))]
-                    entry.prob_measurement[mcast_addr] = MCAST_EWMA_PROB
-                    entry.mode[mcast_addr] = TX_MCAST_LEGACY
-                    entry.managed_mcast_addresses.append(mcast_addr)
-                    self.txp_bin_counter(block=entry.block,
-                        mcast=mcast_addr,
-                        callback=self.txp_bin_counter_callback,
-                        every=1000)
-                    break
+            for index, entry in enumerate(self.mcast_wtps):
+                if entry.block.hwaddr == block.hwaddr:
+                    if mcast_addr not in entry.managed_mcast_addresses:
+                        tx_policy = entry.block.tx_policies[mcast_addr]
+                        tx_policy.mcast = TX_MCAST_LEGACY
+                        tx_policy.mcs = [min(list(block.supports))]
+                        entry.prob_measurement[mcast_addr] = MCAST_EWMA_PROB
+                        entry.mode[mcast_addr] = TX_MCAST_LEGACY_H
+                        entry.rate[mcast_addr] = min(entry.block.supports)
+                        entry.cur_prob_rate[mcast_addr] = min(entry.block.supports)
+                        entry.managed_mcast_addresses.append(mcast_addr)
+                        self.txp_bin_counter(block=entry.block,
+                            mcast=mcast_addr,
+                            callback=self.txp_bin_counter_callback,
+                            every=500)
+                        period = self.lookup_mcast_period(entry)
+                        if period != None:
+                            entry.dms_starting_period[mcast_addr] = period
+                        else:
+                            self.multicast_periods_management(entry)
+                        break
+
 
         for index, entry in enumerate(self.mcast_clients):
             if sta is not None and entry.addr == sta and mcast_addr not in entry.multicast_services:
                 entry.multicast_services.append(mcast_addr)
                 break
 
-    def mcast_addr_unregister(self, mcast_addr, sta, wtp):
+    def lookup_mcast_period(self, mcast_wtp):
+        periods = [i for i in range(0, (mcast_wtp.dms_max_period + mcast_wtp.legacy_max_period), mcast_wtp.dms_max_period)]
+        periods_busyness = [{period: False} for period in periods]
+
+        for index, entry in enumerate(periods_busyness):
+            period = next(iter(entry))
+            if period in list(mcast_wtp.dms_starting_period.values()):
+                entry[period] = True
+
+        for index, entry in enumerate(periods_busyness):
+            period = next(iter(entry))
+            if entry[period] is False:
+                return period
+        return None
+
+    def mcast_addr_unregister(self, sta, mcast_addr, wtp):
         addr_in_use = False
 
         for index, entry in enumerate(self.mcast_clients):
@@ -342,61 +412,90 @@ class MCastMultigroup(EmpowerApp):
                 addr_in_use = True
 
         for block in wtp.supports:
-            for entry in self.mcast_wtps:
-                if entry.block.hwaddr == block.hwaddr and mcast_addr in entry.managed_mcast_addresses and addr_in_use is False:
+            for index, entry in enumerate(self.mcast_wtps):
+                # If there are not clients requesting the service and there is not any ongoing transmission using that address
+                # The address can be removed. The signal must be sent to the corresponding AP
+                if entry.block.hwaddr == block.hwaddr and  mcast_addr in entry.managed_mcast_addresses and addr_in_use is False and \
+                entry.last_tx_bytes[mcast_addr] == 0 and entry.last_tx_pkts[mcast_addr] == 0:
                     entry.managed_mcast_addresses.remove(mcast_addr)
                     del entry.mode[mcast_addr]
                     del entry.rate[mcast_addr]
-                    del cur_prob_rate[mcast_addr]
+                    del entry.cur_prob_rate[mcast_addr]
                     del entry.prob_measurement[mcast_addr]
-                    del last_tx_bytes[mcast_addr]
-                    del last_txp_bin_tx_bytes_counter[mcast_addr]
-                    del last_tx_pkts[mcast_addr]
-                    del last_txp_bin_tx_pkts_counter[mcast_addr]
+                    del entry.last_tx_bytes[mcast_addr]
+                    del entry.last_txp_bin_tx_bytes_counter[mcast_addr]
+                    del entry.last_tx_pkts[mcast_addr]
+                    del entry.last_txp_bin_tx_pkts_counter[mcast_addr]
+                    self.multicast_periods_management(entry)
+                    entry.block.radio.connection.send_del_mcast_addr(mcast_addr, wtp, block.hwaddr, block.channel, block.band)
                     break
 
-    def mcast_addr_query(self, mcast_addr, sta, wtp):
+    def mcast_addr_query(self, sta, mcast_addr, wtp):
         pass
 
     def wtp_register(self, block):
         wtp_info = MCastWTPInfo()
         wtp_info.block = block
+        wtp_info.dms_max_period = max(int(math.ceil(self.dms_min_length / self.every)), int(self.dms_max_length / self.every))
+        wtp_info.legacy_max_period = max(int(self.period_length / self.every) - wtp_info.dms_max_period, 1)
         self.mcast_wtps.append(wtp_info)
-
 
     def loop(self):
         """ Periodic job. """
-        if not self.mcast_clients:
-            return
         for index, entry in enumerate(self.mcast_wtps):
             if not entry.managed_mcast_addresses:
                 continue
+
+            entry.current_period = entry.next_period
             for i, addr in enumerate(entry.managed_mcast_addresses):
-                tx_policy = entry.block.tx_policies[addr] 
-                # If there is no clients, the default mode is DMS
-                # If there are many clients per AP, it combines DMS and legacy to obtain statistics. 
-                # If the AP is in DMS mode and the has been an update of the RSSI, the mode is changed to legacy.
-                if entry.attached_clients == 0 or \
-                (entry.mode[addr] == TX_MCAST_DMS_H and (entry.current_period % (entry.dms_max_period + entry.legacy_max_period)) < 1):
-                    tx_policy.mcast = TX_MCAST_DMS
-                    entry.mode[addr] = TX_MCAST_DMS_H
-                else:
-                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
-                    tx_policy.mcast = TX_MCAST_LEGACY
-                    if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
-                        tx_policy.mcs = [int(ewma_rate)]
-                    elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
-                        tx_policy.mcs = [int(cur_prob_rate)]
-                    entry.rate[addr] = ewma_rate
-                    entry.cur_prob_rate[addr] = cur_prob_rate
-                    entry.mode[addr] = TX_MCAST_LEGACY_H
 
-                    if (entry.current_period % (entry.dms_max_period + entry.legacy_max_period)) == entry.legacy_max_period:
-                        entry.current_period = -1
+                    tx_policy = entry.block.tx_policies[addr]
+                    if (entry.current_period >= entry.dms_starting_period[addr]) and \
+                    (entry.current_period < (entry.dms_starting_period[addr] + entry.dms_max_period)):
+                        tx_policy.mcast = TX_MCAST_DMS
+                        entry.mode[addr] = TX_MCAST_DMS_H
+                    else:
+                        ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
+                        tx_policy.mcast = TX_MCAST_LEGACY
+                        if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
+                            tx_policy.mcs = [int(ewma_rate)]
+                        elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
+                            tx_policy.mcs = [int(cur_prob_rate)]
+                        entry.rate[addr] = ewma_rate
+                        entry.cur_prob_rate[addr] = cur_prob_rate
+                        entry.mode[addr] = TX_MCAST_LEGACY_H
 
-                if entry.attached_clients > 0:
-                    entry.current_period += 1
+            entry.next_period = (entry.next_period + 1) % (entry.dms_max_period + entry.legacy_max_period)
 
+    def multicast_periods_management(self, mcast_wtp):
+        overlap = False # True when there are more multicast addresses than the maximum number of periods (dms + legacy periods)
+        block = 0   # Beginning of the DMS period for each address in this AP
+
+        dms_period = max(int(math.ceil(self.dms_min_length / self.every)), min(int(self.dms_max_length / self.every), int((self.period_length / len(mcast_wtp.managed_mcast_addresses)) / self.every)))
+        legacy_period = max(int(self.period_length / self.every) - dms_period, 1)
+
+        # Period overlap detection
+        total_length = self.every * (dms_period + legacy_period)
+        if self.every * dms_period * len(mcast_wtp.managed_mcast_addresses) > total_length:
+            overlap = True
+
+        #if not duplicates and not overlap:
+        if not overlap and mcast_wtp.dms_max_period == dms_period and mcast_wtp.legacy_max_period == legacy_period:
+            return
+
+        # If there are duplicate periods but there is no overlap, periods must be only rescheduled
+        mcast_wtp.dms_max_period = dms_period
+        mcast_wtp.legacy_max_period = legacy_period
+
+        if len(mcast_wtp.managed_mcast_addresses) == 0:
+            return
+
+        for index, entry in enumerate(mcast_wtp.managed_mcast_addresses):
+            mcast_wtp.dms_starting_period[entry] = (block * mcast_wtp.dms_max_period)
+            if block < ((mcast_wtp.legacy_max_period + mcast_wtp.dms_max_period) // mcast_wtp.dms_max_period - 1):
+                block = block + 1
+            else:
+                block = 0
 
     def calculate_wtp_rate(self, mcast_wtp, addr):
         min_rate = best_rate = min_highest_cur_prob_rate = best_highest_cur_prob_rate = sys.maxsize
@@ -461,7 +560,6 @@ class MCastMultigroup(EmpowerApp):
 
         return best_rate, best_highest_cur_prob_rate
     
-
     def to_dict(self):
         """Return JSON-serializable representation of the object."""
         out = super().to_dict()
@@ -475,8 +573,7 @@ class MCastMultigroup(EmpowerApp):
 
         return out                                  
 
-
-def launch(tenant_id, every=1000, mcast_clients=[], mcast_wtps=[]):
+def launch(tenant_id, every=50, mcast_clients=[], mcast_wtps=[]):
     """ Initialize the module. """
 
     return MCastMultigroup(tenant_id=tenant_id, every=every, mcast_clients=mcast_clients, mcast_wtps=mcast_wtps)
