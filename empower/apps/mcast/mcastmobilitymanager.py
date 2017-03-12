@@ -330,6 +330,8 @@ class MCastMobilityManager(EmpowerApp):
             wtp_info.block = block
             wtp_info.prob_measurement[self.mcast_addr] = MCAST_EWMA_PROB
             wtp_info.mode = TX_MCAST_DMS_H
+            wtp_info.dms_max_period = 20
+            wtp_info.legacy_max_period = 60
             self.mcast_wtps.append(wtp_info)
 
             self.txp_bin_counter(block=block,
@@ -1062,7 +1064,7 @@ class MCastMobilityManager(EmpowerApp):
                                     
 
 
-def launch(tenant_id, every=1000, rx_pkts={}, aps={}, mcast_clients=[], mcast_wtps=[]):
+def launch(tenant_id, every=100, rx_pkts={}, aps={}, mcast_clients=[], mcast_wtps=[]):
     """ Initialize the module. """
 
     return MCastMobilityManager(tenant_id=tenant_id, every=every, rx_pkts=rx_pkts, aps=aps, mcast_clients=mcast_clients, mcast_wtps=mcast_wtps)
