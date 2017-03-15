@@ -229,6 +229,7 @@ class LegacyMcastMultigroup(EmpowerApp):
 
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == default_block.hwaddr:
+                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, default_block.hwaddr, default_block.channel, default_block.band)
                 entry.attached_clients = entry.attached_clients - 1
 
     def mcast_addr_register(self, sta, mcast_addr, wtp):
@@ -238,7 +239,7 @@ class LegacyMcastMultigroup(EmpowerApp):
                     if mcast_addr not in entry.managed_mcast_addresses:
                         tx_policy = entry.block.tx_policies[mcast_addr]
                         tx_policy.mcast = TX_MCAST_LEGACY
-                        tx_policy.mcs = [min(list(block.supports))]
+                        tx_policy.mcs = [min(entry.block.supports)]
                         entry.prob_measurement[mcast_addr] = MCAST_EWMA_PROB
                         entry.mode[mcast_addr] = TX_MCAST_LEGACY_H
                         entry.rate[mcast_addr] = min(entry.block.supports)

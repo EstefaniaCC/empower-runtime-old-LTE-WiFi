@@ -54,6 +54,8 @@ from empower.lvapp import PT_IGMP_REPORT
 from empower.lvapp import IGMP_REPORT
 from empower.lvapp import PT_DEL_MCAST_ADDR
 from empower.lvapp import DEL_MCAST_ADDR
+from empower.lvapp import PT_DEL_MCAST_RECEIVER
+from empower.lvapp import DEL_MCAST_RECEIVER
 from empower.core.lvap import LVAP
 from empower.core.networkport import NetworkPort
 from empower.core.vap import VAP
@@ -1066,3 +1068,22 @@ class LVAPPConnection(object):
 
         for handler in self.server.pt_types_handlers[PT_IGMP_REPORT]:
             handler(request)
+
+    def send_del_mcast_receiver(self, sta, wtp, hwaddr, channel, band):
+        """Send a DEL_MCAST_RECEIVER message.
+        Args:
+            sta: an EtherAddress object
+        Returns:
+            None
+        """
+        response = Container(version=PT_VERSION,
+                             type=PT_DEL_MCAST_ADDR,
+                             length=44,
+                             seq=wtp.seq,
+                             sta=sta.to_raw(),
+                             hwaddr=hwaddr.to_raw(),
+                             channel=channel,
+                             band=band)
+
+        msg = DEL_MCAST_RECEIVER.build(response)
+        self.stream.write(msg)

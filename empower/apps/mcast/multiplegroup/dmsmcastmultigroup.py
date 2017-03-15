@@ -229,6 +229,7 @@ class DMSMcastMultigroup(EmpowerApp):
 
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == default_block.hwaddr:
+                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, default_block.hwaddr, default_block.channel, default_block.band)
                 entry.attached_clients = entry.attached_clients - 1
 
     def mcast_addr_register(self, sta, mcast_addr, wtp):

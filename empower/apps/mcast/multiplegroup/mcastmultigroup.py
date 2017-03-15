@@ -279,6 +279,7 @@ class MCastMultigroup(EmpowerApp):
 
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == default_block.hwaddr:
+                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, default_block.hwaddr, default_block.channel, default_block.band)
                 entry.attached_clients = entry.attached_clients - 1
                 if entry.attached_clients == 0:
                     return
@@ -381,7 +382,6 @@ class MCastMultigroup(EmpowerApp):
                             self.multicast_periods_management(entry)
                         break
 
-
         for index, entry in enumerate(self.mcast_clients):
             if sta is not None and entry.addr == sta and mcast_addr not in entry.multicast_services:
                 entry.multicast_services.append(mcast_addr)
@@ -448,22 +448,27 @@ class MCastMultigroup(EmpowerApp):
 
             entry.current_period = entry.next_period
             for i, addr in enumerate(entry.managed_mcast_addresses):
+                tx_policy = entry.block.tx_policies[addr]
 
-                    tx_policy = entry.block.tx_policies[addr]
-                    if (entry.current_period >= entry.dms_starting_period[addr]) and \
-                    (entry.current_period < (entry.dms_starting_period[addr] + entry.dms_max_period)):
-                        tx_policy.mcast = TX_MCAST_DMS
-                        entry.mode[addr] = TX_MCAST_DMS_H
-                    else:
-                        ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
-                        tx_policy.mcast = TX_MCAST_LEGACY
-                        if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
-                            tx_policy.mcs = [int(ewma_rate)]
-                        elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
-                            tx_policy.mcs = [int(cur_prob_rate)]
-                        entry.rate[addr] = ewma_rate
-                        entry.cur_prob_rate[addr] = cur_prob_rate
-                        entry.mode[addr] = TX_MCAST_LEGACY_H
+                if addr in entry.last_tx_bytes and addr in entry.last_tx_pkts and \
+                entry.last_tx_bytes[addr] == 0 and entry.last_tx_pkts[addr] == 0:
+                    tx_policy.mcast = TX_MCAST_LEGACY
+                    tx_policy.mcs = [min(entry.block.supports)]
+
+                elif (entry.current_period >= entry.dms_starting_period[addr]) and \
+                (entry.current_period < (entry.dms_starting_period[addr] + entry.dms_max_period)):
+                    tx_policy.mcast = TX_MCAST_DMS
+                    entry.mode[addr] = TX_MCAST_DMS_H
+                else:
+                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
+                    tx_policy.mcast = TX_MCAST_LEGACY
+                    if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
+                        tx_policy.mcs = [int(ewma_rate)]
+                    elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
+                        tx_policy.mcs = [int(cur_prob_rate)]
+                    entry.rate[addr] = ewma_rate
+                    entry.cur_prob_rate[addr] = cur_prob_rate
+                    entry.mode[addr] = TX_MCAST_LEGACY_H
 
             entry.next_period = (entry.next_period + 1) % (entry.dms_max_period + entry.legacy_max_period)
 
