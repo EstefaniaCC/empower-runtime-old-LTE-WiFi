@@ -58,6 +58,9 @@ from empower.igmp_report.igmp_report import V1_V2_MEMBERSHIP_QUERY
 import empower.logger
 LOG = empower.logger.get_logger()
 
+MCAST_EWMA_PROB = "ewma"
+MCAST_CUR_PROB = "cur_prob"
+
 
 class DMSMcastMultigroup(EmpowerApp):
 
@@ -314,11 +317,11 @@ class DMSMcastMultigroup(EmpowerApp):
             out['mcast_clients'].append(p.to_dict())
         out['mcast_wtps'] = []
         for p in self.mcast_wtps:
-            out['mcast_wtps'].append(p.to_dict()
+            out['mcast_wtps'].append(p.to_dict())
 
-        return out                                
+        return out                              
 
-def launch(tenant_id, every=1000, mcast_clients=[], mcast_wtps=[]):
+def launch(tenant_id, every=500, mcast_clients=[], mcast_wtps=[]):
     """ Initialize the module. """
 
     return DMSMcastMultigroup(tenant_id=tenant_id, every=every, mcast_clients=mcast_clients, mcast_wtps=mcast_wtps)

@@ -89,7 +89,7 @@ class MCastMultigroup(EmpowerApp):
         self.__mcast_wtps = list()
         self.__prob_thershold = 95
         self.__every = 50
-        self.__period_length = 2000
+        self.__period_length = 3000
         self.__dms_min_length = 200
         self.__dms_max_length = 500
 
@@ -476,7 +476,10 @@ class MCastMultigroup(EmpowerApp):
         overlap = False # True when there are more multicast addresses than the maximum number of periods (dms + legacy periods)
         block = 0   # Beginning of the DMS period for each address in this AP
 
-        dms_period = max(int(math.ceil(self.dms_min_length / self.every)), min(int(self.dms_max_length / self.every), int((self.period_length / len(mcast_wtp.managed_mcast_addresses)) / self.every)))
+        if len(mcast_wtp.managed_mcast_addresses) > 0:
+            dms_period = max(int(math.ceil(self.dms_min_length / self.every)), min(int(self.dms_max_length / self.every), int((self.period_length / len(mcast_wtp.managed_mcast_addresses)) / self.every)))
+        else:
+            dms_period = max(int(math.ceil(self.dms_min_length / self.every)), int(self.dms_max_length / self.every))
         legacy_period = max(int(self.period_length / self.every) - dms_period, 1)
 
         # Period overlap detection
