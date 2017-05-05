@@ -250,7 +250,7 @@ class MCastMultigroup(EmpowerApp):
         if any(lvap.addr == entry.addr for entry in self.mcast_clients):
             return
 
-        lvap.lvap_stats(every=500, callback=self.lvap_stats_callback)
+        lvap.lvap_stats(every=50, callback=self.lvap_stats_callback)
         self.igmp_report(every=500, callback=self.igmp_report_callback)
 
         default_block = next(iter(lvap.downlink))
@@ -270,6 +270,7 @@ class MCastMultigroup(EmpowerApp):
 
         default_block = next(iter(lvap.downlink))
         mcast_addresses_in_use = list()
+        current_wtp = None
 
         for index, entry in enumerate(self.mcast_clients):
             if entry.addr == lvap.addr:
@@ -277,9 +278,15 @@ class MCastMultigroup(EmpowerApp):
                 mcast_addresses_in_use = entry.multicast_services
                 break
 
+        for wtp in RUNTIME.tenants[self.tenant_id].wtps.values():
+            for block in wtp.supports:
+                if default_block.hwaddr == block.hwaddr:
+                    current_wtp = wtp
+                    break
+
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == default_block.hwaddr:
-                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, default_block.hwaddr, default_block.channel, default_block.band)
+                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, current_wtp, default_block.hwaddr, default_block.channel, default_block.band)
                 entry.attached_clients = entry.attached_clients - 1
                 if entry.attached_clients == 0:
                     return
@@ -316,6 +323,9 @@ class MCastMultigroup(EmpowerApp):
         higher_thershold_cur_prob_rates = []
         higher_thershold_cur_prob = []
         lowest_rate = min(int(float(key)) for key in rates.keys())
+        available_rates = sorted(rates.keys())
+        second_highest_prob = 0
+        second_highest_rate = 0
 
         # Looks for the rate that has the highest ewma prob. for the station.
         # If two rates have the same probability, the highest one is selected. 
@@ -323,6 +333,8 @@ class MCastMultigroup(EmpowerApp):
         for key, entry in rates.items():  #key is the rate
             if (rates[key]["prob"] > highest_prob) or \
             (rates[key]["prob"] == highest_prob and int(float(key)) > highest_rate):
+                second_highest_rate = highest_rate
+                second_highest_prob = highest_prob
                 highest_rate = int(float(key))
                 highest_prob = rates[key]["prob"]
             if (int(float(rates[key]["prob"]))) >= self.prob_thershold:
@@ -339,7 +351,18 @@ class MCastMultigroup(EmpowerApp):
                 highest_cur_prob = rates[key]["cur_prob"] 
             if (int(float(rates[key]["cur_prob"]))) >= self.prob_thershold:
                 higher_thershold_cur_prob_rates.append(int(float(key)))
-                higher_thershold_cur_prob.append(rates[key]["cur_prob"])     
+                higher_thershold_cur_prob.append(rates[key]["cur_prob"])  
+
+        if (highest_prob < self.prob_thershold) and (rates[str(float(highest_rate))]["cur_prob"] < self.prob_thershold) and (highest_rate > 12):
+            rate_index = [i for i,x in enumerate(available_rates) if x == str(float(highest_rate))][-1]
+            highest_rate = int(float(available_rates[(rate_index - 1)]))
+
+        if highest_rate == 9:
+            highest_rate = 12
+
+        # if (highest_prob < self.prob_thereshold):
+        #     highest_rate = second_highest_rate
+        #     highest_prob = second_highest_prob
 
         if highest_cur_prob == 0 and highest_prob == 0:
             highest_rate = lowest_rate
@@ -411,24 +434,24 @@ class MCastMultigroup(EmpowerApp):
             elif entry.addr != sta and mcast_addr in entry.multicast_services:
                 addr_in_use = True
 
-        for block in wtp.supports:
-            for index, entry in enumerate(self.mcast_wtps):
-                # If there are not clients requesting the service and there is not any ongoing transmission using that address
-                # The address can be removed. The signal must be sent to the corresponding AP
-                if entry.block.hwaddr == block.hwaddr and  mcast_addr in entry.managed_mcast_addresses and addr_in_use is False and \
-                entry.last_tx_bytes[mcast_addr] == 0 and entry.last_tx_pkts[mcast_addr] == 0:
-                    entry.managed_mcast_addresses.remove(mcast_addr)
-                    del entry.mode[mcast_addr]
-                    del entry.rate[mcast_addr]
-                    del entry.cur_prob_rate[mcast_addr]
-                    del entry.prob_measurement[mcast_addr]
-                    del entry.last_tx_bytes[mcast_addr]
-                    del entry.last_txp_bin_tx_bytes_counter[mcast_addr]
-                    del entry.last_tx_pkts[mcast_addr]
-                    del entry.last_txp_bin_tx_pkts_counter[mcast_addr]
-                    self.multicast_periods_management(entry)
-                    entry.block.radio.connection.send_del_mcast_addr(mcast_addr, wtp, block.hwaddr, block.channel, block.band)
-                    break
+        # for block in wtp.supports:
+        #     for index, entry in enumerate(self.mcast_wtps):
+        #         # If there are not clients requesting the service and there is not any ongoing transmission using that address
+        #         # The address can be removed. The signal must be sent to the corresponding AP
+        #         if entry.block.hwaddr == block.hwaddr and  mcast_addr in entry.managed_mcast_addresses and addr_in_use is False and \
+        #         entry.last_tx_bytes[mcast_addr] == 0 and entry.last_tx_pkts[mcast_addr] == 0:
+        #             entry.managed_mcast_addresses.remove(mcast_addr)
+        #             del entry.mode[mcast_addr]
+        #             del entry.rate[mcast_addr]
+        #             del entry.cur_prob_rate[mcast_addr]
+        #             del entry.prob_measurement[mcast_addr]
+        #             del entry.last_tx_bytes[mcast_addr]
+        #             del entry.last_txp_bin_tx_bytes_counter[mcast_addr]
+        #             del entry.last_tx_pkts[mcast_addr]
+        #             del entry.last_txp_bin_tx_pkts_counter[mcast_addr]
+        #             self.multicast_periods_management(entry)
+        #             entry.block.radio.connection.send_del_mcast_addr(mcast_addr, wtp, block.hwaddr, block.channel, block.band)
+        #             break
 
     def mcast_addr_query(self, sta, mcast_addr, wtp):
         pass
@@ -450,24 +473,32 @@ class MCastMultigroup(EmpowerApp):
             for i, addr in enumerate(entry.managed_mcast_addresses):
                 tx_policy = entry.block.tx_policies[addr]
 
-                if addr in entry.last_tx_bytes and addr in entry.last_tx_pkts and \
-                entry.last_tx_bytes[addr] == 0 and entry.last_tx_pkts[addr] == 0:
-                    tx_policy.mcast = TX_MCAST_LEGACY
-                    tx_policy.mcs = [min(entry.block.supports)]
-
-                elif (entry.current_period >= entry.dms_starting_period[addr]) and \
+                # if addr in entry.last_tx_bytes and addr in entry.last_tx_pkts and \
+                # entry.last_tx_bytes[addr] == 0 and entry.last_tx_pkts[addr] == 0:
+                #     tx_policy.mcast = TX_MCAST_LEGACY
+                #     tx_policy.mcs = [min(entry.block.supports)]
+                    # if addr not in entry.unused_addresses.items():
+                    #     entry.unused_addresses[addr] = 1
+                    # else:
+                    #     if entry.unused_addresses[addr] >= 10:
+                    #         self.mcast_addr_unregister()
+                    #     else:
+                    #         entry.unused_addresses[addr] += 1
+                if (entry.current_period >= entry.dms_starting_period[addr]) and \
                 (entry.current_period < (entry.dms_starting_period[addr] + entry.dms_max_period)):
                     tx_policy.mcast = TX_MCAST_DMS
                     entry.mode[addr] = TX_MCAST_DMS_H
-                else:
-                    ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
+                elif (entry.current_period < entry.dms_starting_period[addr]) or \
+                    (entry.current_period >= (entry.dms_starting_period[addr] + entry.dms_max_period)):
+                    if tx_policy.mcast == TX_MCAST_DMS:
+                        ewma_rate, cur_prob_rate = self.calculate_wtp_rate(entry, addr)
+                        if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
+                            tx_policy.mcs = [int(ewma_rate)]
+                        elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
+                            tx_policy.mcs = [int(cur_prob_rate)]
+                        entry.rate[addr] = ewma_rate
+                        entry.cur_prob_rate[addr] = cur_prob_rate
                     tx_policy.mcast = TX_MCAST_LEGACY
-                    if entry.prob_measurement[addr] == MCAST_EWMA_PROB:
-                        tx_policy.mcs = [int(ewma_rate)]
-                    elif entry.prob_measurement[addr] == MCAST_CUR_PROB:
-                        tx_policy.mcs = [int(cur_prob_rate)]
-                    entry.rate[addr] = ewma_rate
-                    entry.cur_prob_rate[addr] = cur_prob_rate
                     entry.mode[addr] = TX_MCAST_LEGACY_H
 
             entry.next_period = (entry.next_period + 1) % (entry.dms_max_period + entry.legacy_max_period)
@@ -500,7 +531,7 @@ class MCastMultigroup(EmpowerApp):
 
         for index, entry in enumerate(mcast_wtp.managed_mcast_addresses):
             mcast_wtp.dms_starting_period[entry] = (block * mcast_wtp.dms_max_period)
-            if block < ((mcast_wtp.legacy_max_period + mcast_wtp.dms_max_period) // mcast_wtp.dms_max_period - 1):
+            if block < (((mcast_wtp.legacy_max_period + mcast_wtp.dms_max_period) // mcast_wtp.dms_max_period) - 1):
                 block = block + 1
             else:
                 block = 0
@@ -516,9 +547,9 @@ class MCastMultigroup(EmpowerApp):
             if entry.attached_hwaddr == mcast_wtp.block.hwaddr and addr in entry.multicast_services:
                 # It looks for the lowest rate among all the receptors just in case in there is no valid intersection
                 # for the best rates of the clients (for both the ewma and cur probabilities). 
-                if entry.highest_rate < min_rate:
+                if entry.highest_rate < min_rate and entry.highest_rate != 0:
                     min_rate = entry.highest_rate
-                if entry.highest_cur_prob_rate < min_highest_cur_prob_rate:
+                if entry.highest_cur_prob_rate < min_highest_cur_prob_rate and entry.highest_cur_prob_rate != 0:
                     min_highest_cur_prob_rate = entry.highest_cur_prob_rate
 
                 # It checks if there is a possible intersection among the clients rates for the emwa prob.
@@ -547,7 +578,7 @@ class MCastMultigroup(EmpowerApp):
                             second_thershold_valid = False
 
         # If the old client was the only client in the wtp or there is not any client, lets have the basic rate
-        if min_rate == sys.maxsize:
+        if min_rate == sys.maxsize or min_highest_cur_prob_rate == sys.maxsize:
             for index, entry in enumerate(self.mcast_wtps):
                 if entry.block.hwaddr == mcast_wtp.block.hwaddr:
                     min_rate = min(entry.block.supports)

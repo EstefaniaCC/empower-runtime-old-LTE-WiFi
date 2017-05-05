@@ -224,15 +224,22 @@ class DMSMcastMultigroup(EmpowerApp):
         """Called when an LVAP disassociates from a tennant."""
 
         default_block = next(iter(lvap.downlink))
+        current_wtp = None
 
         for index, entry in enumerate(self.mcast_clients):
             if entry.addr == lvap.addr:
                 del self.mcast_clients[index]
                 break
 
+        for wtp in RUNTIME.tenants[self.tenant_id].wtps.values():
+            for block in wtp.supports:
+                if default_block.hwaddr == block.hwaddr:
+                    current_wtp = wtp
+                    break
+
         for index, entry in enumerate(self.mcast_wtps):
             if entry.block.hwaddr == default_block.hwaddr:
-                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, default_block.hwaddr, default_block.channel, default_block.band)
+                entry.block.radio.connection.send_del_mcast_receiver(lvap.addr, current_wtp, default_block.hwaddr, default_block.channel, default_block.band)
                 entry.attached_clients = entry.attached_clients - 1
 
     def mcast_addr_register(self, sta, mcast_addr, wtp):

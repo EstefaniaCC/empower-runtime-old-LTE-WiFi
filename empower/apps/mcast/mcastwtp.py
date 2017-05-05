@@ -65,6 +65,7 @@ class MCastWTPInfo(object):
         self.__avg_perceived_rssi = 0
         self.__dev_perceived_rssi = 0
         self.__managed_mcast_addresses = list()
+        self.__unused_addresses = dict()
 
     
     @property
@@ -276,6 +277,15 @@ class MCastWTPInfo(object):
     def managed_mcast_addresses(self, managed_mcast_addresses):
 
         self.__managed_mcast_addresses = managed_mcast_addresses
+
+    @property
+    def unused_addresses(self):
+        """Return the unused_addresses and the number of periods without being used."""
+        return self.__unused_addresses
+
+    @unused_addresses.setter
+    def unused_addresses(self, unused_addresses):
+        self.__unused_addresses = unused_addresses
 
     def to_dict(self):
         """Return JSON-serializable representation of the object."""
