@@ -1002,3 +1002,26 @@ class LVAPPConnection(object):
         msg = INCOM_MCAST_RESPONSE.build(response)
         LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.stream.write(msg)
+
+
+    def send_channel_switch_request(self, lvap, req_channel, req_mode, req_count):
+        """Send a CHANNEL_SWITCH_REQUEST message.
+        Args:
+            lvap: an LVAP object
+        Returns:
+            None
+        Raises:
+            TypeError: if lvap is not an LVAP object.
+        """
+
+        response = Container(version=PT_VERSION,
+                             type=PT_CHANNEL_SWITCH_REQUEST,
+                             length=16,
+                             seq=self.wtp.seq,
+                             sta=lvap.addr.to_raw(),
+                             new_channel=req_channel,
+                             mode=req_mode,
+                             count=req_count)
+
+        msg = CHANNEL_SWITCH_REQUEST.build(response)
+        self.stream.write(msg)

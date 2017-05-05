@@ -56,6 +56,8 @@ PT_STATUS_VAP = 0x33
 PT_INCOM_MCAST_REQUEST = 0x38
 PT_INCOM_MCAST_RESPONSE = 0x39
 
+PT_CHANNEL_SWITCH_REQUEST = 0x50
+
 HEADER = Struct("header", UBInt8("version"),
                 UBInt8("type"),
                 UBInt32("length"))
@@ -258,6 +260,15 @@ INCOM_MCAST_RESPONSE = Struct("incom_mcast_addr_response", UBInt8("version"),
                     Bytes("mcast_addr", 6),
                     UBInt8("iface"))
 
+CHANNEL_SWITCH_REQUEST = Struct("channel_switch_request", UBInt8("version"),
+                       UBInt8("type"),
+                       UBInt32("length"),
+                       UBInt32("seq"),
+                       Bytes("sta", 6),
+                       UBInt8("channel"),
+                       UBInt8("count"),
+                       UBInt8("mode")
+
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
             PT_LVAP_JOIN: None,
@@ -277,7 +288,8 @@ PT_TYPES = {PT_BYE: None,
             PT_STATUS_PORT: STATUS_PORT,
             PT_STATUS_VAP: STATUS_VAP,
             PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
-            PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE}
+            PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE,
+            PT_CHANNEL_SWITCH_REQUEST: CHANNEL_SWITCH_REQUEST}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -298,4 +310,5 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_STATUS_PORT: [],
                      PT_STATUS_VAP: [],
                      PT_INCOM_MCAST_REQUEST: [],
-                     PT_INCOM_MCAST_RESPONSE: []}
+                     PT_INCOM_MCAST_RESPONSE: [], 
+                     PT_CHANNEL_SWITCH_REQUEST: []}
