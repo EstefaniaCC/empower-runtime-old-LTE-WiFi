@@ -475,7 +475,7 @@ function requestTenant(pending) {
     }
 
     if (plmn_id != "") {
-        request['plmn_id'] = plmn_id
+        request["plmn_id"] = plmn_id;
     }
 
     $.ajax({
@@ -557,6 +557,9 @@ function loadTenants(username, admin) {
                 }
                 for (wtp in data[stream].wtps) {
                     devs.innerHTML += data[stream].wtps[wtp].addr + "<br />"
+                }
+                for (vbs in data[stream].vbses) {
+                    devs.innerHTML += data[stream].vbses[vbs].addr + "<br />"
                 }
                 var status = row.insertCell(4);
                 status.innerHTML = data[stream].owner

@@ -15,46 +15,44 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Bin counter Poller Apps."""
+"""Cqm links poller Apps."""
 
 from empower.core.app import EmpowerApp
 from empower.core.app import DEFAULT_PERIOD
 
 
-class BinCounterPoller(EmpowerApp):
-    """Bin Counter Poller Apps.
+class CQMLinksPoller(EmpowerApp):
+    """CQM Links Poller Apps.
 
     Command Line Parameters:
 
         tenant_id: tenant id
-        filepath: path to file for statistics (optional, default ./)
         every: loop period in ms (optional, default 5000ms)
 
     Example:
 
-        ./empower-runtime.py apps.pollers.counterspoller \
+        ./empower-runtime.py apps.pollers.cqmlinkspoller \
             --tenant_id=52313ecb-9d00-4b7d-b873-b55d3d9ada26D
     """
 
     def __init__(self, **kwargs):
         EmpowerApp.__init__(self, **kwargs)
-        self.lvapjoin(callback=self.lvap_join_callback)
+        self.wtpup(callback=self.wtp_up_callback)
 
-    def lvap_join_callback(self, lvap):
+    def wtp_up_callback(self, wtp):
         """ New LVAP. """
 
-        self.bin_counter(lvap=lvap.addr,
-                         bins=[512, 1514, 8192],
-                         every=self.every,
-                         callback=self.counters_callback)
+        self.cqm_links(every=self.every,
+                       wtp=wtp.addr,
+                       callback=self.cqm_links_callback)
 
-    def counters_callback(self, stats):
+    def cqm_links_callback(self, stats):
         """ New stats available. """
 
-        self.log.info("New counters received from %s" % stats.lvap)
+        self.log.info("New counters received from %s" % stats.wtp)
 
 
 def launch(tenant_id, every=DEFAULT_PERIOD):
     """ Initialize the module. """
 
-    return BinCounterPoller(tenant_id=tenant_id, every=every)
+    return CQMLinksPoller(tenant_id=tenant_id, every=every)

@@ -95,7 +95,7 @@ class BaseHandler(tornado.web.RequestHandler):
                     error=error)
 
 
-class EmpowerAppHomeHandler(tornado.web.RequestHandler):
+class EmpowerAppHomeHandler(BaseHandler):
     """Web UI Handler.
 
     Templates must be put in the /templates/<app name>/ sub-directory. Static
@@ -329,7 +329,9 @@ class DenyHandler(ACLHandler):
 
 class IMSI2MACHandler(EmpowerAPIHandler):
 
-    """IMSI to MAC address handler. Used to view and manipulate the IMSI to MAC mappings."""
+    """IMSI to MAC address handler.
+
+    Used to view and manipulate the IMSI to MAC mappings."""
 
     HANDLERS = [r"/api/v1/imsi2mac/?",
                 r"/api/v1/imsi2mac/([0-9]*)/?"]
@@ -413,7 +415,8 @@ class IMSI2MACHandler(EmpowerAPIHandler):
             func = getattr(RUNTIME, 'add_imsi2mac')
             func(int(request['imsi']), EtherAddress(request['addr']))
 
-            self.set_header("Location", "/api/v1/imsi2mac/%s" % request['imsi'])
+            self.set_header("Location",
+                            "/api/v1/imsi2mac/%s" % request['imsi'])
 
         except KeyError as ex:
             self.send_error(404, message=ex)
@@ -888,17 +891,15 @@ class PendingTenantHandler(EmpowerAPIHandler):
             if "tenant_name" not in request:
                 raise ValueError("missing tenant_name element")
 
-            if "bssid_type" not in request:
-                bssid_type = T_TYPE_UNIQUE
-            else:
+            bssid_type = T_TYPE_UNIQUE
+            if "bssid_type" in request:
                 bssid_type = request['bssid_type']
 
-            if bssid_type not in T_TYPES:
-                raise ValueError("invalid bssid_type %s" % bssid_type)
+            # If PLMN ID is not given, default it to 000000 value
+            plmn_id = 000000
 
-            if "plmn_id" not in request:
-                plmn_id = None
-            else:
+            if "plmn_id" in request and request['plmn_id'] != None and \
+                (len(request['plmn_id']) == 5 or len(request['plmn_id']) == 6):
                 plmn_id = int(request['plmn_id'])
 
             if len(args) == 1:
@@ -1048,10 +1049,11 @@ class TenantHandler(EmpowerAPIHandler):
             if bssid_type not in T_TYPES:
                 raise ValueError("invalid bssid_type %s" % bssid_type)
 
-            if "plmn_id" not in request:
-                plmn_id = None
-            else:
-                plmn_id = int(request['plmn_id'])
+            # If PLMN ID is not given, default it to 000000 value
+            plmn_id = 000000
+
+            if "plmn_id" in request and request['plmn_id'] != None:
+                plmn_id = request['plmn_id']
 
             if len(args) == 1:
                 tenant_id = UUID(args[0])
@@ -1290,22 +1292,6 @@ class TenantComponentsHandler(EmpowerAPIHandlerUsers):
 class RESTServer(tornado.web.Application):
     """Exposes the REST API."""
 
-    handlers = [BaseHandler,
-                EmpowerAppHomeHandler,
-                RequestTenantHandler,
-                ProfileHandler,
-                AuthLoginHandler,
-                AuthLogoutHandler,
-                ManageTenantHandler,
-                AccountsHandler,
-                ComponentsHandler,
-                TenantComponentsHandler,
-                PendingTenantHandler,
-                TenantHandler,
-                AllowHandler,
-                DenyHandler,
-                IMSI2MACHandler]
-
     parms = {
         "template_path": settings.TEMPLATE_PATH,
         "static_path": settings.STATIC_PATH,
@@ -1320,13 +1306,7 @@ class RESTServer(tornado.web.Application):
         self.cert = cert
         self.key = key
 
-        handlers = []
-
-        for handler in self.handlers:
-            for url in handler.HANDLERS:
-                handlers.append((url, handler))
-
-        tornado.web.Application.__init__(self, handlers, **self.parms)
+        tornado.web.Application.__init__(self, [], **self.parms)
 
         if not cert or not key:
             http_server = tornado.httpserver.HTTPServer(self)
@@ -1337,6 +1317,17 @@ class RESTServer(tornado.web.Application):
             })
 
         http_server.listen(self.port)
+
+        handler_classes = [BaseHandler, EmpowerAppHomeHandler,
+                           RequestTenantHandler, ProfileHandler,
+                           AuthLoginHandler, AuthLogoutHandler,
+                           ManageTenantHandler, AccountsHandler,
+                           ComponentsHandler, TenantComponentsHandler,
+                           PendingTenantHandler, TenantHandler,
+                           AllowHandler, DenyHandler, IMSI2MACHandler]
+
+        for handler_class in handler_classes:
+            self.add_handler_class(handler_class, http_server)
 
     def add_handler_class(self, handler_class, server):
         """Add a new handler class."""
