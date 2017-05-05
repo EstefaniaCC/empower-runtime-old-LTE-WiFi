@@ -15,46 +15,56 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Bin counter Poller Apps."""
+"""Basic mobility manager."""
 
 from empower.core.app import EmpowerApp
 from empower.core.app import DEFAULT_PERIOD
 
 
-class BinCounterPoller(EmpowerApp):
-    """Bin Counter Poller Apps.
+class SimpleMobilityManager(EmpowerApp):
+    """Basic mobility manager.
 
     Command Line Parameters:
 
         tenant_id: tenant id
-        filepath: path to file for statistics (optional, default ./)
         every: loop period in ms (optional, default 5000ms)
 
     Example:
 
-        ./empower-runtime.py apps.pollers.counterspoller \
-            --tenant_id=52313ecb-9d00-4b7d-b873-b55d3d9ada26D
+        ./empower-runtime.py apps.simplemobilitymanager.simplemobilitymanager \
+            --tenant_id=52313ecb-9d00-4b7d-b873-b55d3d9ada26
     """
 
     def __init__(self, **kwargs):
         EmpowerApp.__init__(self, **kwargs)
-        self.lvapjoin(callback=self.lvap_join_callback)
 
-    def lvap_join_callback(self, lvap):
-        """ New LVAP. """
+        # Register an wtp up event
+        self.wtpup(callback=self.wtp_up_callback)
 
-        self.bin_counter(lvap=lvap.addr,
-                         bins=[512, 1514, 8192],
-                         every=self.every,
-                         callback=self.counters_callback)
+    def wtp_up_callback(self, wtp):
+        """Called when a new WTP connects to the controller."""
 
-    def counters_callback(self, stats):
-        """ New stats available. """
+        for block in wtp.supports:
+            self.ucqm(block=block, every=self.every)
 
-        self.log.info("New counters received from %s" % stats.lvap)
+    def loop(self):
+        """ Periodic job. """
+
+        for lvap in self.lvaps():
+
+            pool = self.blocks()
+            valid = pool & lvap.supported
+
+            if not valid:
+                return
+
+            new_block = max(valid, key=lambda x: x.ucqm[lvap.addr]['mov_rssi'])
+            self.log.info("LVAP %s -> %s" % (lvap.addr, new_block))
+
+            lvap.scheduled_on = new_block
 
 
 def launch(tenant_id, every=DEFAULT_PERIOD):
     """ Initialize the module. """
 
-    return BinCounterPoller(tenant_id=tenant_id, every=every)
+    return SimpleMobilityManager(tenant_id=tenant_id, every=every)
