@@ -183,6 +183,9 @@ class LVAP(object):
         # supported resource blocks
         self.supported = ResourcePool()
 
+        # target resource block when performing a handover
+        self.target_block = None
+
     def set_ports(self):
         """Set virtual ports.
 
@@ -344,6 +347,21 @@ class LVAP(object):
         self.refresh_lvap()
 
     @property
+    def target_block(self):
+        """ Get the target_block of this LVAP. """
+
+        return self._target_block
+
+    @target_block.setter
+    def target_block(self, target_block):
+        """ Set the target_block. """
+
+        #if self._downlink == target_block:
+        #    return
+
+        self._target_block = target_block
+
+    @property
     def downlink(self):
         """ Get the resource blocks assigned to this LVAP in the downlink. """
 
@@ -374,12 +392,17 @@ class LVAP(object):
             self.set_ports()
             return
 
+        # downlink block
+        default_block = pool.pop()
+
+        print("TARGET_BLOCK", default_block)
+        print("CURRENT BLOCK", self.default_block)
+
+        self.target_block  = default_block
+
         # clear downlink blocks
         for block in list(self._downlink.keys()):
             del self._downlink[block]
-
-        # downlink block
-        default_block = pool.pop()
 
         # check if block is also in the uplink, if so remove it
         if default_block in self._uplink:

@@ -56,7 +56,8 @@ PT_STATUS_VAP = 0x33
 PT_INCOM_MCAST_REQUEST = 0x38
 PT_INCOM_MCAST_RESPONSE = 0x39
 
-PT_CHANNEL_SWITCH_REQUEST = 0x50
+PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP = 0x50
+PT_UPDATE_WTP_CHANNEL = 0x51
 
 HEADER = Struct("header", UBInt8("version"),
                 UBInt8("type"),
@@ -145,7 +146,13 @@ DEL_LVAP = Struct("del_lvap", UBInt8("version"),
                   UBInt8("type"),
                   UBInt32("length"),
                   UBInt32("seq"),
-                  Bytes("sta", 6))
+                  Bytes("sta", 6),
+                  BitStruct("csa_flags", Padding(7),
+                            Bit("csa_active")),
+                  Bytes("csa_hwaddr", 6),
+                  UBInt8("csa_channel"),
+                  UBInt8("csa_switch_mode"),
+                  UBInt8("csa_switch_count"))
 
 STATUS_LVAP = Struct("status_lvap", UBInt8("version"),
                      UBInt8("type"),
@@ -264,14 +271,25 @@ INCOM_MCAST_RESPONSE = Struct("incom_mcast_addr_response", UBInt8("version"),
                     Bytes("mcast_addr", 6),
                     UBInt8("iface"))
 
-CHANNEL_SWITCH_REQUEST = Struct("channel_switch_request", UBInt8("version"),
+CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP = Struct("channel_switch_announcement", UBInt8("version"),
                        UBInt8("type"),
                        UBInt32("length"),
                        UBInt32("seq"),
                        Bytes("sta", 6),
+                       BitStruct("csa_flags", Padding(7),
+                            Bit("csa_active")),
+                       UBInt8("csa_channel"),
+                       UBInt8("csa_switch_mode"),
+                       UBInt8("csa_switch_count"))
+
+UPDATE_WTP_CHANNEL =  Struct("channel_switch_request", UBInt8("version"),
+                       UBInt8("type"),
+                       UBInt32("length"),
+                       UBInt32("seq"),
                        UBInt8("channel"),
-                       UBInt8("count"),
-                       UBInt8("mode")
+                       Bytes("hwaddr", 6),
+                       UBInt8("old_channel"),
+                       UBInt8("band"))
 
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
@@ -293,7 +311,8 @@ PT_TYPES = {PT_BYE: None,
             PT_STATUS_VAP: STATUS_VAP,
             PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
             PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE,
-            PT_CHANNEL_SWITCH_REQUEST: CHANNEL_SWITCH_REQUEST}
+            PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
+            PT_UPDATE_WTP_CHANNEL: UPDATE_WTP_CHANNEL}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -315,4 +334,5 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_STATUS_VAP: [],
                      PT_INCOM_MCAST_REQUEST: [],
                      PT_INCOM_MCAST_RESPONSE: [], 
-                     PT_CHANNEL_SWITCH_REQUEST: []}
+                     PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: [],
+                     PT_UPDATE_WTP_CHANNEL: []}
