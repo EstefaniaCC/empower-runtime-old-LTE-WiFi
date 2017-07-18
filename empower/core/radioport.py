@@ -229,6 +229,7 @@ class RadioPortProp(dict):
         if dict.__contains__(self, key):
 
             # update dict
+            print("UPD SET PORT IN RADIOPORT")
             dict.__setitem__(self, key, value)
 
         # the block is not found, max_ports is exceed
@@ -242,9 +243,13 @@ class RadioPortProp(dict):
             # update dict
             dict.__setitem__(self, key, value)
 
+            print("KEY", key)
+            print("VALUE", value)
+
             # update LVAP configuration
             key.radio.connection.send_add_lvap(value.lvap, key, self.SET_MASK)
 
+            print("NEW SET PORT IN RADIOPORT")
             # update Port configuration
             key.radio.connection.send_set_port(value.tx_policy)
 

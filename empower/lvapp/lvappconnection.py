@@ -990,6 +990,7 @@ class LVAPPConnection(object):
                              ht_mcs=ht_rates)
 
         LOG.info("Set tx policy %s", tx_policy)
+        print("Channel %d", tx_policy.block.channel)
 
         msg = SET_PORT.build(set_port)
         self.stream.write(msg)

@@ -398,7 +398,7 @@ class LVAP(object):
         print("TARGET_BLOCK", default_block)
         print("CURRENT BLOCK", self.default_block)
 
-        self.target_block  = default_block
+        self.target_block = default_block
 
         # clear downlink blocks
         for block in list(self._downlink.keys()):
