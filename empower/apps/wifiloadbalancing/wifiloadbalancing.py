@@ -32,6 +32,7 @@ from empower.lvapp import CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
 from empower.lvapp import PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
 from empower.lvapp import UPDATE_WTP_CHANNEL
 from empower.lvapp import PT_UPDATE_WTP_CHANNEL
+from empower.core.resourcepool import BANDS
 
 
 GRAPH_TOP_BOTTOM_MARGIN = 40
@@ -95,6 +96,10 @@ class WifiLoadBalancing(EmpowerApp):
         self.channels_bg = [1, 6, 11]
         self.channels_an = [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 123, 136, 140]
         self.aps_clients_rel = {}
+        self.aps_occupation = {}
+
+        self.links = {}
+        self.addr = "ff:ff:ff:ff:ff:ff" 
 
         # Register an wtp up event
         self.wtpup(callback=self.wtp_up_callback)
@@ -154,6 +159,7 @@ class WifiLoadBalancing(EmpowerApp):
         out['conflict_aps'] = self.conflict_aps
         out['stations_aps_matrix'] = self.stations_aps_matrix
         out['bitrate_data_active'] = self.bitrate_data_active
+        out['links'] = self.links
 
         return out
 
@@ -167,6 +173,11 @@ class WifiLoadBalancing(EmpowerApp):
                         tenant_id=self.tenant.tenant_id,
                         every=self.every,
                         callback=self.ucqm_callback)
+
+            self.summary(addr=self.addr,
+                         block=block,
+                         period=1000,
+                         callback=self.summary_callback)
 
             if block.addr.to_str() not in self.conflict_aps:
                 self.conflict_aps[block.addr.to_str()] = []
@@ -245,8 +256,10 @@ class WifiLoadBalancing(EmpowerApp):
         """Called when an joins the network."""
 
         self.bin_counter(lvap=lvap.addr,
-                 every=5000,
+                 every=500,
                  callback=self.counters_callback)
+
+        lvap.lvap_stats(every=500, callback=self.lvap_stats_callback)
 
         self.aps_clients_rel[lvap.default_block.addr.to_str()].append(lvap.addr.to_str())
 
@@ -258,6 +271,72 @@ class WifiLoadBalancing(EmpowerApp):
 
         del self.bitrate_data[lvap.default_block.addr.to_str()][lvap.addr.to_str()]
         del self.bitrate_data_active[lvap.default_block.addr.to_str()][lvap.addr.to_str()]
+
+    def lvap_stats_callback(self, counter):
+        """ New stats available. """
+
+        rates = (counter.to_dict())["rates"]
+        if not rates or counter.lvap not in RUNTIME.lvaps:
+            return
+
+        highest_prob = 0
+        highest_rate = 0
+        lvap = RUNTIME.lvaps[counter.lvap]
+        
+        for key, entry in rates.items():  #key is the rate
+            if (rates[key]["prob"] > highest_prob) or \
+            (rates[key]["prob"] == highest_prob and int(float(key)) > highest_rate):
+                highest_rate = int(float(key))
+                highest_prob = rates[key]["prob"]
+
+        self.wifi_data[lvap.default_block.addr.to_str() + lvap.addr.to_str()]['prob'] = highest_prob
+        self.wifi_data[lvap.default_block.addr.to_str() + lvap.addr.to_str()]['rate'] = highest_rate
+
+    def summary_callback(self, summary):
+        """ New stats available. """
+
+        self.log.info("New summary from %s addr %s frames %u", summary.block,
+                      summary.addr, len(summary.frames))
+
+        # per block log
+        filename = "survey_%s_%u_%s.csv" % (summary.block.addr,
+                                            summary.block.channel,
+                                            BANDS[summary.block.band])
+
+        for frame in summary.frames:
+
+            line = "%u,%g,%s,%d,%u,%s,%s,%s,%s,%s\n" % \
+                (frame['tsft'], frame['rate'], frame['rtype'], frame['rssi'],
+                 frame['length'], frame['type'], frame['subtype'],
+                 frame['ra'], frame['ta'], frame['seq'])
+
+            with open(filename, 'a') as file_d:
+                file_d.write(line)
+
+        # per link log
+        for frame in summary.frames:
+
+            link = "%s_%s_%u_%s" % (frame['ta'], summary.block.addr,
+                                    summary.block.channel,
+                                    BANDS[summary.block.band])
+
+            filename = "link_%s.csv" % link
+
+            if link not in self.links:
+                self.links[link] = {}
+
+            if frame['rssi'] not in self.links[link]:
+                self.links[link][frame['rssi']] = 0
+
+            self.links[link][frame['rssi']] += 1
+
+            line = "%u,%g,%s,%d,%u,%s,%s,%s,%s,%s\n" % \
+                (frame['tsft'], frame['rate'], frame['rtype'], frame['rssi'],
+                 frame['length'], frame['type'], frame['subtype'],
+                 frame['ra'], frame['ta'], frame['seq'])
+
+            with open(filename, 'a') as file_d:
+                file_d.write(line)
 
     def counters_callback(self, stats):
         """ New stats available. """
@@ -291,7 +370,11 @@ class WifiLoadBalancing(EmpowerApp):
                             'channel': lvap.default_block.channel,
                             'active': 1,
                             'tx_bytes_per_second': stats.tx_bytes_per_second[0],
-                            'rx_bytes_per_second': stats.rx_bytes_per_second[0]
+                            'rx_bytes_per_second': stats.rx_bytes_per_second[0],
+                            'reesched_tries': 0,
+                            'revert_tries': 0,
+                            'prob': 0,
+                            'rate': 0
                         }
 
         self.bitrate_data[block.addr.to_str()][stats.lvap.to_str()] = \
@@ -301,7 +384,6 @@ class WifiLoadBalancing(EmpowerApp):
                                     }
                             
 
-        
         possible_revert_lvap = False
         possible_resched_lvap = False
         # Minimum voice bitrates:
@@ -312,7 +394,6 @@ class WifiLoadBalancing(EmpowerApp):
             if stats.tx_bytes_per_second[0] >= 500:
                 # This means the app was already active or it was not there
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] = stats.tx_bytes_per_second[0]
-                possible_resched_lvap = True
             else:
                 # if self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] >= 500:
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] = 0
@@ -320,14 +401,19 @@ class WifiLoadBalancing(EmpowerApp):
             if stats.rx_bytes_per_second[0] >= 500:
                 # This means the app was already active or it was not there
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] = stats.rx_bytes_per_second[0]
-                possible_resched_lvap = True
             else:
                 # if self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] >= 500:
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] = 0
 
+            if (self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] >= 500) or \
+                (self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] >= 500):
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['reesched_tries'] += 1
+
             if (self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] < 500) and \
                 (self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] < 500):
-                del self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['reesched_tries'] = 0
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['revert_tries'] += 1
+                
         else:
             if stats.tx_bytes_per_second[0] >= 500:
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()] = \
@@ -335,7 +421,7 @@ class WifiLoadBalancing(EmpowerApp):
                                                 'tx_bytes_per_second': stats.tx_bytes_per_second[0],
                                                 'rx_bytes_per_second': 0
                                             }
-                possible_resched_lvap = True
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['reesched_tries'] += 1
                                     
             if stats.rx_bytes_per_second[0] >= 500:
                 self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()] = \
@@ -343,22 +429,23 @@ class WifiLoadBalancing(EmpowerApp):
                                                 'tx_bytes_per_second': 0,
                                                 'rx_bytes_per_second': stats.rx_bytes_per_second[0]
                                             }
-                possible_resched_lvap = True
-                                    
-
-            # if (self.bitrate_data_active[block][lvap]['tx_bytes_per_second'] != 0) or \
-            #     (self.bitrate_data_active[block][lvap]['rx_bytes_per_second'] != 0):
-            #     possible_resched_lvap = True
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['reesched_tries'] += 1
 
 
             if (stats.rx_bytes_per_second[0] < 500) and (stats.tx_bytes_per_second[0] < 500):
-                possible_revert_lvap = True
+                self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['revert_tries'] += 1
 
 
         print("------self.bitrate_data_active[block]", self.bitrate_data_active[block.addr.to_str()])
-        
+
+        if self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['revert_tries'] >= 5:
+            if lvap.addr.to_str() in self.bitrate_data_active[block.addr.to_str()]:
+                del self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]
+            possible_revert_lvap = True
+        elif self.wifi_data[block.addr.to_str() + stats.lvap.to_str()]['reesched_tries'] >= 5:
+            possible_resched_lvap = True
+
         self.update_transmission_traffic(block)
-        
 
         if not possible_revert_lvap and not possible_resched_lvap:
             print("NO SCHEDULING")
@@ -406,6 +493,8 @@ class WifiLoadBalancing(EmpowerApp):
             print("++++++++COME BACK++++++++")
             current_rssi = self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi']
             print("------current_rssi", current_rssi)
+
+            self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['revert_tries'] = 0
             
             for wtp in self.stations_aps_matrix[lvap.addr.to_str()]:
                 if wtp == block.addr.to_str():
@@ -430,12 +519,14 @@ class WifiLoadBalancing(EmpowerApp):
 
         ###### New Transmission or in case that the bitrate of the transmission increased ######
         if possible_resched_lvap:
+            self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['reesched_tries'] = 0
             # It is not necessary to perform a change if the traffic of the ap is lower than the average or if it is holding a single lvap
             if block.addr.to_str() not in self.total_rx_bytes_per_second and block.addr.to_str() not in self.total_tx_bytes_per_second:
                 print("NOTHING HERE")
                 return
+
             average_traffic = self.average_traffic_surrounding_aps(lvap)
-            if (self.total_tx_bytes_per_second[block.addr.to_str()] + self.total_rx_bytes_per_second[block.addr.to_str()]) < average_traffic \
+            if (self.total_tx_bytes_per_second[block.addr.to_str()] + self.total_rx_bytes_per_second[block.addr.to_str()]) <= average_traffic \
                 or self.nb_app_active[block.addr.to_str()] < 2:
                 print("NOT ENOUGH TRAFFIC")
                 print("average traffic", average_traffic)
@@ -448,18 +539,27 @@ class WifiLoadBalancing(EmpowerApp):
             if len(self.stations_aps_matrix[lvap.addr.to_str()]) < 2: 
                 return
 
+            ########## Estimation of the channel occupancy of the candidate APs ###########
+            less_busy_ap = block.addr.to_str()
+            less_occupation = sys.maxsize
+            for entry in self.stations_aps_matrix[lvap.addr.to_str()]:
+                occupation = 0
+
+                for sta in self.aps_clients_rel[entry]:
+                    occupation += ((self.wifi_data[entry + sta]['tx_bytes_per_second'] \
+                                    + self.wifi_data[entry + sta]['rx_bytes_per_second']) * 8 \
+                                    / self.wifi_data[entry + sta]['rate']) / 1000000
+
+                if occupation < less_occupation:
+                    less_busy_ap = entry
+                    less_occupation = occupation
+
+                self.aps_occupation[entry] = occupation
+
+
             for entry in self.stations_aps_matrix[lvap.addr.to_str()]:
                 if entry == block.addr.to_str():
                     continue
-
-                # if entry not in self.total_tx_bytes_per_second.keys() or entry not in self.total_rx_bytes_per_second.keys():
-                #     print("SOMETHING NASTY HAPPENS")
-                #     print("self.total_tx_bytes_per_second", self.total_tx_bytes_per_second)
-                #     print("self.total_rx_bytes_per_second", self.total_rx_bytes_per_second)
-                #     print("entry", entry)
-                #     print(entry not in self.total_tx_bytes_per_second)
-                #     print("self.stations_aps_matrix_complete[lvap.addr.to_str()]", self.stations_aps_matrix_complete[lvap.addr.to_str()])
-                #     continue
 
                 if (self.total_tx_bytes_per_second[entry] + self.total_rx_bytes_per_second[entry]) > average_traffic:
                     print("TOO MUCH TRAFFIC IN THE CANDIDATE AP")
@@ -610,10 +710,10 @@ class WifiLoadBalancing(EmpowerApp):
             self.bitrate_data_active[dst_block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] = self.bitrate_data_active[src_block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second']
 
         del self.bitrate_data_active[src_block.addr.to_str()][lvap.addr.to_str()]
-        del self.wifi_data[src_block.addr.to_str() + lvap.addr.to_str()]
-        del self.bitrate_data[src_block.addr.to_str()][lvap.addr.to_str()]
-
-        
+        self.wifi_data[src_block.addr.to_str() + lvap.addr.to_str()]['tx_bytes_per_second'] = 0
+        self.wifi_data[src_block.addr.to_str() + lvap.addr.to_str()]['rx_bytes_per_second'] = 0
+        self.bitrate_data[src_block.addr.to_str()][lvap.addr.to_str()]['tx_bytes_per_second'] = 0
+        self.bitrate_data[src_block.addr.to_str()][lvap.addr.to_str()]['rx_bytes_per_second'] = 0 
 
 
     def conflict_graph(self):
@@ -662,7 +762,11 @@ class WifiLoadBalancing(EmpowerApp):
                                         'channel': poller.block.channel,
                                         'active': active_flag,
                                         'tx_bytes_per_second': None,
-                                        'rx_bytes_per_second': None
+                                        'rx_bytes_per_second': None,
+                                        'reesched_tries': 0,
+                                        'revert_tries': 0,
+                                        'prob': 0,
+                                        'rate': 0
                                     }
 
                 # Conversion of the data structure to obtain the conflict APs
@@ -734,6 +838,26 @@ class WifiLoadBalancing(EmpowerApp):
 
         if not initial_channel:
             return
+
+        for wtp in wtps.values():
+            for block in wtp.supports:
+                if block.channel == initial_channel:
+                    continue
+                # If it holds any lvap... 
+                self.announce_channel_switch_to_bss(block, initial_channel)
+                block.radio.connection.send_channel_switch_request(initial_channel, block.hwaddr, block.channel, block.band)
+
+                self.update_block(block, initial_channel)
+
+                for lvap in self.aps_clients_rel[block.addr.to_str()]:
+                    self.wifi_data[block.addr.to_str() + lvap]['channel'] = initial_channel
+
+
+    def setup_channels(self):
+
+        wtps = RUNTIME.tenants[self.tenant.tenant_id].wtps
+
+        initial_channel = 40
 
         for wtp in wtps.values():
             for block in wtp.supports:

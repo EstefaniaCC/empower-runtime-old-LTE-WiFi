@@ -364,16 +364,21 @@ class LVAPPConnection(object):
         lvap = LVAP(sta, net_bssid, net_bssid)
         lvap.set_ssids(list(ssids))
 
-        RUNTIME.lvaps[sta] = lvap
-
         # This will trigger an LVAP ADD message (and REMOVE if necessary)
         lvap.supported = ResourcePool()
-        hwaddr = EtherAddress(request.hwaddr)
         channel = request.channel
         band = request.band
-        lvap.supported.add(ResourceBlock(lvap, hwaddr, channel, band))
+        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
 
-        lvap.scheduled_on = wtp.supports & lvap.supported
+        valid = wtp.supports & lvap.supported
+        if not valid:
+            LOG.warning("No valid intersection found. Ignoring request.")
+            return
+
+        # save LVAP in the runtime
+        RUNTIME.lvaps[sta] = lvap
+
+        lvap.scheduled_on = valid
 
         LOG.info("Sending probe response to %s", lvap.addr)
         self.send_probe_response(lvap)
@@ -497,10 +502,9 @@ class LVAPPConnection(object):
 
         # update supported blocks field
         lvap.supported = ResourcePool()
-        hwaddr = EtherAddress(request.hwaddr)
         channel = request.channel
         band = request.band
-        lvap.supported.add(ResourceBlock(lvap, hwaddr, channel, band))
+        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
 
         # this will trigger an add lvap message to update the assoc id
         lvap.assoc_id = self.server.assoc_id
@@ -602,7 +606,7 @@ class LVAPPConnection(object):
         match = wtp.supports & lvap.supported
 
         if not match:
-            LOG.error("Incoming block %s is invalid", block)
+            LOG.error("Incoming block %s is invalid", lvap.supported)
             return
 
         block = match.pop()
@@ -1018,9 +1022,13 @@ class LVAPPConnection(object):
         print("BLOCK", block)
         print("channel", block.channel)
 
+        lvap_block = next(iter(lvap.supported))
+        lvap_band = lvap_block.band
+
+
         add_lvap = Container(version=PT_VERSION,
                              type=PT_ADD_LVAP,
-                             length=48,
+                             length=49,
                              seq=self.wtp.seq,
                              group=lvap.group,
                              flags=flags,
@@ -1028,6 +1036,7 @@ class LVAPPConnection(object):
                              hwaddr=block.hwaddr.to_raw(),
                              channel=block.channel,
                              band=block.band,
+                             lvap_band=lvap_band,
                              sta=lvap.addr.to_raw(),
                              encap=encap.to_raw(),
                              net_bssid=lvap.net_bssid.to_raw(),
