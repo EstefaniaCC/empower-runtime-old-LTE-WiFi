@@ -21,6 +21,7 @@ import random
 from empower.core.app import EmpowerApp
 from empower.core.app import DEFAULT_PERIOD
 from empower.datatypes.etheraddress import EtherAddress
+from empower.core.resourcepool import ResourceBlock
 from empower.main import RUNTIME
 from empower.maps.ucqm import ucqm
 from empower.maps.ucqm import UCQMWorker
@@ -85,7 +86,7 @@ class WifiLoadBalancing(EmpowerApp):
         self.stations_aps_matrix = {}
 
         self.initial_setup = True
-        self.warm_up_phases = 10
+        self.warm_up_phases = 20
 
         self.conflict_aps = {}
         self.aps_channels_matrix = {}
@@ -159,38 +160,24 @@ class WifiLoadBalancing(EmpowerApp):
     def wtp_up_callback(self, wtp):
         """Called when a new WTP connects to the controller."""
 
+        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
+
         for block in wtp.supports:
+            # channels = self.channels_bg + self.channels_an
+            # new_channel = random.choice(channels)
+            #     # If it holds any lvap... 
+            # self.update_block(block, new_channel)
+
+            # for lvap in lvaps.values():
+            #     if lvap.default_block.addr != block.addr:
+            #         continue
+            #     lvap.scheduled_on = block
+            #     self.update_counters(lvap)
 
             self.ucqm(block=block,
                         tenant_id=self.tenant.tenant_id,
                         every=self.every,
                         callback=self.ucqm_callback)
-
-            if block.addr.to_str() in self.aps_clients_rel:
-                lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
-                bin_worker = RUNTIME.components[BinCounterWorker.__module__]
-                stats_worker = RUNTIME.components[LVAPStatsWorker.__module__]
-
-                for sta in self.aps_clients_rel[block.addr.to_str()]:
-                    for lvap in lvaps.values():
-                        if lvap.addr.to_str() != sta:
-                            continue
-
-                        for module_id in list(bin_worker.modules.keys()):
-                            bincounter_mod = bin_worker.modules[module_id]
-                            print("****************************************")
-                            print(bincounter_mod)
-                            if lvap == bincounter_mod.lvap:
-                                worker.remove_module(module_id)
-
-                        for module_id in list(stats_worker.modules.keys()):
-                            lvap_stats_mod = stats_worker.modules[module_id]
-                            print("****************************************")
-                            print(lvap_stats_mod)
-                            if lvap == lvap_stats_mod.lvap:
-                                worker.remove_module(module_id)
-
-                        break
 
             if block.addr.to_str() not in self.conflict_aps:
                 self.conflict_aps[block.addr.to_str()] = []
@@ -218,14 +205,18 @@ class WifiLoadBalancing(EmpowerApp):
     def wtp_down_callback(self, wtp):
         """Called when a wtp connectdiss from the controller."""
 
-        worker = RUNTIME.components[UCQMWorker.__module__]
+        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
 
         for block in wtp.supports:
-            for module_id in list(worker.modules.keys()):
-                ucqm_mod = worker.modules[module_id]
-                if block != ucqm_mod.block:
+            self.delete_ucqm_worker(block)
+
+            for lvap in lvaps.values():
+                if lvap.default_block != block:
                     continue
-                worker.remove_module(module_id)
+
+                self.delete_bincounter_worker(lvap)
+                self.delete_lvap_stats_worker(lvap)
+
 
             if block.addr.to_str() in self.conflict_aps:
                 del self.conflict_aps[block.addr.to_str()]
@@ -256,44 +247,19 @@ class WifiLoadBalancing(EmpowerApp):
     def lvap_join_callback(self, lvap):
         """Called when an joins the network."""
 
-        # self.bin_counter(lvap=lvap.addr,
-        #          every=500,
-        #          callback=self.counters_callback)
-
-        # self.lvap_stats(lvap=lvap.addr, 
-        #             every=500, 
-        #             callback=self.lvap_stats_callback)
-
         self.update_counters(lvap)
-
         self.aps_clients_rel[lvap.default_block.addr.to_str()].append(lvap.addr.to_str())
 
     def lvap_leave_callback(self, lvap):
         """Called when an LVAP disassociates from a tennant."""
 
-        worker = RUNTIME.components[BinCounterWorker.__module__]
+        self.delete_bincounter_worker(lvap)
+        self.delete_lvap_stats_worker(lvap)
 
-        for module_id in list(worker.modules.keys()):
-            bincounter_mod = worker.modules[module_id]
-            print("****************************************")
-            print(bincounter_mod)
-            if lvap == bincounter_mod.lvap:
-                worker.remove_module(module_id)
-
-        worker = RUNTIME.components[LVAPStatsWorker.__module__]
-
-        for module_id in list(worker.modules.keys()):
-            lvap_stats_mod = worker.modules[module_id]
-            print("****************************************")
-            print(lvap_stats_mod)
-            if lvap == lvap_stats_mod.lvap:
-                worker.remove_module(module_id)
-
-        self.aps_clients_rel[lvap.default_block.addr.to_str()].remove(lvap.addr.to_str())
-
-        #TODO. DELANTE THE COUNTERS FROM THE BITRATE DATA AND SIMILAR
-
-        del self.bitrate_data_active[lvap.default_block.addr.to_str()][lvap.addr.to_str()]
+        if lvap.addr.to_str() in self.aps_clients_rel[lvap.default_block.addr.to_str()]:
+            self.aps_clients_rel[lvap.default_block.addr.to_str()].remove(lvap.addr.to_str())
+        if lvap.addr.to_str() in self.bitrate_data_active[lvap.default_block.addr.to_str()]:
+            del self.bitrate_data_active[lvap.default_block.addr.to_str()][lvap.addr.to_str()]
 
     def lvap_stats_callback(self, counter):
         """ New stats available. """
@@ -514,11 +480,15 @@ class WifiLoadBalancing(EmpowerApp):
         ########## Estimation of the channel occupancy of the candidate APs ###########
         
         if block.addr.to_str() not in self.aps_clients_rel:
+            self.aps_occupancy[block.addr.to_str()] = 0
             return 
 
         occupation = 0
         for sta in self.aps_clients_rel[block.addr.to_str()]:
-            if block.addr.to_str() + sta not in self.wifi_data:
+            if block.addr.to_str() + sta not in self.wifi_data or \
+                self.wifi_data[block.addr.to_str() + sta]['tx_bytes_per_second'] is None or \
+                self.wifi_data[block.addr.to_str() + sta]['rx_bytes_per_second'] is None:
+                self.aps_occupancy[block.addr.to_str()] = 0
                 return
 
             if self.wifi_data[block.addr.to_str() + sta]['rate'] == 0:
@@ -738,18 +708,34 @@ class WifiLoadBalancing(EmpowerApp):
 
         return new_channel
 
-    def update_block(self, block, channel):
-
+    def delete_ucqm_worker(self, block):
         worker = RUNTIME.components[UCQMWorker.__module__]
 
         for module_id in list(worker.modules.keys()):
             ucqm_mod = worker.modules[module_id]
-            print("****************************************")
-            print(ucqm_mod)
             if block == ucqm_mod.block:
                 worker.remove_module(module_id)
+
+    def delete_bincounter_worker(self, lvap):
+        worker = RUNTIME.components[BinCounterWorker.__module__]
+
+        for module_id in list(worker.modules.keys()):
+            bincounter_mod = worker.modules[module_id]
+            if lvap == bincounter_mod.lvap:
+                worker.remove_module(module_id)
+
+    def delete_lvap_stats_worker(self, lvap):
+        worker = RUNTIME.components[LVAPStatsWorker.__module__]
+
+        for module_id in list(worker.modules.keys()):
+            lvap_stats_mod = worker.modules[module_id]
+            if lvap == lvap_stats_mod.lvap:
+                worker.remove_module(module_id)
+
+    def update_block(self, block, channel):
+
+        self.delete_ucqm_worker(block)
             
-        old_block_status = block
         block.channel = channel
 
         ucqm_mod = self.ucqm(block=block,
@@ -757,8 +743,8 @@ class WifiLoadBalancing(EmpowerApp):
                         every=self.every,
                         callback=self.ucqm_callback)
 
-        if old_block_status.addr.to_str() in self.aps_clients_rel:
-            for lvap in self.aps_clients_rel[old_block_status.addr.to_str()]:
+        if block.addr.to_str() in self.aps_clients_rel:
+            for lvap in self.aps_clients_rel[block.addr.to_str()]:
                 self.wifi_data[block.addr.to_str() + lvap]['channel'] = channel
 
         self.aps_channels_matrix[block.addr.to_str()] = channel
@@ -766,28 +752,12 @@ class WifiLoadBalancing(EmpowerApp):
 
     def update_counters(self, lvap):
 
-        worker = RUNTIME.components[BinCounterWorker.__module__]
-
-        for module_id in list(worker.modules.keys()):
-            bincounter_mod = worker.modules[module_id]
-            print("****************************************")
-            print(bincounter_mod)
-            if lvap == bincounter_mod.lvap:
-                worker.remove_module(module_id)
-
+        self.delete_bincounter_worker(lvap)
         self.bin_counter(lvap=lvap.addr,
                  every=500,
                  callback=self.counters_callback)
 
-        worker = RUNTIME.components[LVAPStatsWorker.__module__]
-
-        for module_id in list(worker.modules.keys()):
-            lvap_stats_mod = worker.modules[module_id]
-            print("****************************************")
-            print(lvap_stats_mod)
-            if lvap == lvap_stats_mod.lvap:
-                worker.remove_module(module_id)
-
+        self.delete_lvap_stats_worker(lvap)
         self.lvap_stats(lvap=lvap.addr, 
                     every=500, 
                     callback=self.lvap_stats_callback)
@@ -893,70 +863,6 @@ class WifiLoadBalancing(EmpowerApp):
             elif poller.block.addr.to_str() + addr['addr'].to_str() in self.wifi_data:
                 del self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]
 
-
-    @property
-    def wtp_addrs(self):
-        """Return wtp_addrs."""
-
-        return self.__wtp_addrs
-
-    @wtp_addrs.setter
-    def wtp_addrs(self, value):
-        """Set wtp_addrs."""
-
-        self.__wtp_addrs = [EtherAddress(x) for x in value.split(",")]
-
-    @property
-    def lvap_addr(self):
-        """Return lvap_addr."""
-
-        return self.__lvap_addr
-
-    @lvap_addr.setter
-    def lvap_addr(self, value):
-        """Set lvap_addr."""
-        self.__lvap_addr = EtherAddress(value)
-
-
-    def revert_channels(self):
-
-        wtps = RUNTIME.tenants[self.tenant.tenant_id].wtps
-        initial_channel = None
-        for wtp in wtps.values():
-            for block in wtp.supports:
-                if not initial_channel:
-                    initial_channel = block.channel
-                    break
-
-        if not initial_channel:
-            return
-
-        for wtp in wtps.values():
-            for block in wtp.supports:
-                if block.channel == initial_channel:
-                    continue
-                # If it holds any lvap... 
-                # self.announce_channel_switch_to_bss(block, initial_channel)
-                old_block = block
-                block.radio.connection.send_channel_switch_request(initial_channel, block.hwaddr, block.channel, block.band)
-
-                self.update_block(block, initial_channel)
-
-                for lvap in lvaps.values():
-                    if lvap.default_block != block:
-                        continue
-                    lvap.scheduled_on = block
-                    self.update_counters(lvap)
-
-                if old_block != block:
-                    print("revert_channels DISTINTO BLOQUE")
-                else:
-                    print("revert_channels MISMO BLOQUE")
-
-                for lvap in self.aps_clients_rel[block.addr.to_str()]:
-                    self.wifi_data[block.addr.to_str() + lvap]['channel'] = initial_channel
-
-
     def set_random_channels(self):
 
         wtps = RUNTIME.tenants[self.tenant.tenant_id].wtps
@@ -965,35 +871,27 @@ class WifiLoadBalancing(EmpowerApp):
 
         for wtp in wtps.values():
             for block in wtp.supports:
-                initial_channel = random.choice(channels)
+                new_channel = random.choice(channels)
                 # If it holds any lvap... 
-                # self.announce_channel_switch_to_bss(block, initial_channel)
-                old_block = block
-                block.radio.connection.send_channel_switch_request(initial_channel, block.hwaddr, block.channel, block.band)
-                self.update_block(block, initial_channel)
+                self.update_block(block, new_channel)
 
                 for lvap in lvaps.values():
-                    if lvap.default_block != block:
+                    if lvap.default_block.addr != block.addr:
                         continue
-                    lvap.default_block.channel = initial_channel
+                    lvap.scheduled_on = block
                     self.update_counters(lvap)
 
-                if old_block != block:
-                    print("set_random_channels DISTINTO BLOQUE")
-                else:
-                    print("set_random_channels MISMO BLOQUE")
 
                 if block.addr.to_str() not in self.aps_clients_rel:
                     self.aps_clients_rel[block.addr.to_str()] = []
 
                     for lvap in lvaps.values():
-                        if lvap.default_block != block:
+                        if lvap.default_block.addr != block.addr:
                             continue
                         self.aps_clients_rel[block.addr.to_str()].append(lvap.addr.to_str())
 
                 for lvap in self.aps_clients_rel[block.addr.to_str()]:
-                    self.wifi_data[block.addr.to_str() + lvap]['channel'] = initial_channel
-
+                    self.wifi_data[block.addr.to_str() + lvap]['channel'] = new_channel
 
     def switch_channel_in_block(self, req_block, channel):
 
@@ -1004,39 +902,28 @@ class WifiLoadBalancing(EmpowerApp):
                 if block != req_block:
                     continue
 
-                # If it holds any lvap... 
-                # self.announce_channel_switch_to_bss(block, channel)
-                old_block = block
-                block.radio.connection.send_channel_switch_request(channel, block.hwaddr, block.channel, block.band)
-                self.update_block(block, channel)
+                initial_channel = block.channel
+                block.channel = channel
 
                 for lvap in lvaps.values():
                     if lvap.default_block != block:
                         continue
-                    lvap.default_block.channel = channel
+                    
+                    for b in lvap.supported:
+                        if b.addr != block.addr:
+                            continue
+                        b.channel = channel
+                        break
+                    lvap.scheduled_on = block
                     self.update_counters(lvap)
-
-                if old_block != block:
-                    print("switch_channel_in_block DISTINTO BLOQUE")
-                else:
-                    print("switch_channel_in_block MISMO BLOQUE")
+                
+                block.radio.connection.send_channel_switch_request(channel, block.hwaddr, initial_channel, block.band)
+                self.update_block(block, channel)
 
                 for lvap in self.aps_clients_rel[block.addr.to_str()]:
                     self.wifi_data[block.addr.to_str() + lvap]['channel'] = channel
 
                 return
-
-    def announce_channel_switch_to_bss(self, block, new_channel):
-
-        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
-
-        for lvap in lvaps.values():
-            if lvap.default_block.hwaddr != block.hwaddr:
-                continue
-            req_mode = 1
-            req_count = 10
-            self.log.info("Sending channel switch request to LVAP %s from channel %d to %d..." %(lvap.addr, lvap.default_block.channel, new_channel))
-            lvap.default_block.radio.connection.send_channel_switch_announcement_to_lvap(lvap, new_channel, req_mode, req_count)
 
     def average_occupancy_surrounding_aps(self, lvap):
         average_occupancy = 0
@@ -1141,7 +1028,12 @@ class WifiLoadBalancing(EmpowerApp):
             #Message to the APs to change the channel
             self.initial_setup = False
             #self.revert_channels()
+            #self.set_random_channels()
+        elif not self.initial_setup and self.warm_up_phases <= 0 and self.warm_up_phases > -80:
+            self.warm_up_phases -= 1
+        elif not self.initial_setup and self.warm_up_phases == -80:
             self.set_random_channels()
+            self.warm_up_phases -= 1
 
 
 def launch(tenant_id, period=500):

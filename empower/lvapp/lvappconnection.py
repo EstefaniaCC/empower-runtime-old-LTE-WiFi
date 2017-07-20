@@ -220,8 +220,6 @@ class LVAPPConnection(object):
         wtp.last_seen = hello.seq
         wtp.last_seen_ts = time.time()
 
-        vap_available = False
-
         # Upon connection to the controller, the WTP must be provided
         # with the list of shared VAP
         for tenant in RUNTIME.tenants.values():
@@ -229,28 +227,6 @@ class LVAPPConnection(object):
             if tenant.bssid_type == T_TYPE_UNIQUE:
                 continue
 
-
-            # tenant does not use shared VAPs
-            # if tenant.bssid_type == T_TYPE_UNIQUE:
-            #     if not RUNTIME.tenants[tenant.tenant_id].lvaps:
-            #         print("no lvaps")
-            #         continue 
-            #     if not RUNTIME.tenants[tenant.tenant_id].vaps:
-            #         print("no vaps")
-            #         continue
-            #     for vap_id in list(RUNTIME.tenants[tenant.tenant_id].vaps.keys()):
-            #         print("algo")
-            #         vap = RUNTIME.tenants[tenant.tenant_id].vaps[vap_id]
-            #         if vap.wtp == wtp:
-            #             LOG.info("Deleting VAP: %s", vap.net_bssid)
-            #             del RUNTIME.tenants[tenant.tenant_id].vaps[vap.net_bssid]
-            #     continue
-
-            # # If at least one shared tenant is available, a VAP will be created. 
-            # # Otherwise, a fake VAP is created in order to allow the AP to send beacons and be discovered. 
-            # vap_available = True
-
-            # wtp not in this tenant
             if wtp.addr not in tenant.wtps:
                 continue
 
@@ -270,33 +246,6 @@ class LVAPPConnection(object):
 
                 self.send_add_vap(vap)
                 RUNTIME.tenants[tenant_id].vaps[net_bssid] = vap
-
-        # If at least one shared tenant is available, a VAP will be created. 
-        # Otherwise, a fake VAP is created in order to aFdelllow the AP to send beacons and be discovered.
-        # if vap_available is True:
-        #     return
-
-        # for tenant in RUNTIME.tenants.values():
-        #     # wtp not in this tenant
-        #     if wtp.addr not in tenant.wtps:
-        #         continue
-
-        #     tenant_id = tenant.tenant_id
-        #     tokens = [tenant_id.hex[0:12][i:i + 2] for i in range(0, 12, 2)]
-        #     base_bssid = EtherAddress(':'.join(tokens))
-
-        #     for block in wtp.supports:
-
-        #         net_bssid = generate_bssid(base_bssid, block.hwaddr)
-
-        #         # vap has already been created
-        #         if net_bssid in RUNTIME.tenants[tenant_id].vaps:
-        #             continue
-
-        #         vap = VAP(net_bssid, block, wtp, tenant)
-
-        #         self.send_add_vap(vap)
-        #         RUNTIME.tenants[tenant_id].vaps[net_bssid] = vap
 
     def _handle_probe_request(self, wtp, request):
         """Handle an incoming PROBE_REQUEST message.
@@ -346,17 +295,6 @@ class LVAPPConnection(object):
         if not ssids:
             LOG.info("No SSIDs available at this WTP")
             return
-
-        # for tenant in RUNTIME.tenants.values():
-        #     if wtp.addr not in tenant.wtps:
-        #         continue
-        #     for vap_id in list(RUNTIME.tenants[tenant.tenant_id].vaps.keys()):
-        #         vap = RUNTIME.tenants[tenant.tenant_id].vaps[vap_id]
-        #         if vap.wtp == wtp:
-        #             LOG.info("Deleting VAP: %s", vap.net_bssid)
-        #             del RUNTIME.tenants[tenant.tenant_id].vaps[vap.net_bssid]
-        #             self.send_del_vap(vap)
-        #             return
 
         # spawn new LVAP
         LOG.info("Spawning new LVAP %s on %s", sta, wtp.addr)
@@ -1113,33 +1051,6 @@ class LVAPPConnection(object):
         LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
         self.stream.write(msg)
 
-
-    def send_channel_switch_announcement_to_lvap(self, lvap, req_channel, req_mode, req_count):
-        """Send a CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP message.
-        Args:
-            lvap: an LVAP object
-        Returns:
-            None
-        Raises:
-            TypeError: if lvap is not an LVAP object.
-        """
-
-        csa_flags = Container(csa_active=True)
-
-        response = Container(version=PT_VERSION,
-                             type=PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
-                             length=20,
-                             seq=self.wtp.seq,
-                             sta=lvap.addr.to_raw(),
-                             csa_flags=csa_flags,
-                             csa_channel=req_channel,
-                             csa_switch_mode=req_mode,
-                             csa_switch_count=req_count)
-
-
-        msg = CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP.build(response)
-        self.stream.write(msg)
-
     def send_channel_switch_request(self, req_channel, hwaddr, old_channel, band):
         """Send a CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP message.
         Args:
@@ -1161,4 +1072,23 @@ class LVAPPConnection(object):
 
 
         msg = UPDATE_WTP_CHANNEL.build(response)
+        self.stream.write(msg)
+
+
+    def send_channel_switch_announcement_to_lvap(self, lvap, req_channel, req_mode, req_count):
+
+        csa_flags = Container(csa_active=True)
+
+        response = Container(version=PT_VERSION,
+                             type=PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
+                             length=20,
+                             seq=self.wtp.seq,
+                             sta=lvap.addr.to_raw(),
+                             csa_flags=csa_flags,
+                             csa_channel=req_channel,
+                             csa_switch_mode=req_mode,
+                             csa_switch_count=req_count)
+
+
+        msg = CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP.build(response)
         self.stream.write(msg)

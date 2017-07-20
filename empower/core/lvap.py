@@ -356,9 +356,6 @@ class LVAP(object):
     def target_block(self, target_block):
         """ Set the target_block. """
 
-        #if self._downlink == target_block:
-        #    return
-
         self._target_block = target_block
 
     @property

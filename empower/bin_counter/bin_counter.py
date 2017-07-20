@@ -184,6 +184,17 @@ class BinCounter(Module):
             return
 
         lvap = tenant.lvaps[self.lvap]
+        lvaps = RUNTIME.tenants[tenant.tenant_id].lvaps
+
+        if lvap.addr not in lvaps:
+            worker = RUNTIME.components[BinCounterWorker.__module__]
+
+            for module_id in list(worker.modules.keys()):
+                bincounter_mod = worker.modules[module_id]
+                if lvap == bincounter_mod.lvap:
+                    worker.remove_module(module_id)
+                    return
+
 
         if not lvap.wtp.connection or lvap.wtp.connection.stream.closed():
             self.log.info("WTP %s not connected", lvap.wtp.addr)

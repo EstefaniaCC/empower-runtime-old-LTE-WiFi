@@ -127,6 +127,17 @@ class LVAPStats(Module):
 
         lvap = tenant.lvaps[self.lvap]
 
+        lvaps = RUNTIME.tenants[tenant.tenant_id].lvaps
+
+        if lvap.addr not in lvaps:
+            worker = RUNTIME.components[LVAPStatsWorker.__module__]
+
+            for module_id in list(worker.modules.keys()):
+                lvap_stats_counter_mod = worker.modules[module_id]
+                if lvap == lvap_stats_counter_mod.lvap:
+                    worker.remove_module(module_id)
+                    return
+
         if not lvap.wtp.connection or lvap.wtp.connection.stream.closed():
             self.log.info("WTP %s not connected", lvap.wtp.addr)
             self.unload()
