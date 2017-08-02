@@ -332,7 +332,8 @@ class Module(object):
         if isinstance(other, Module):
             return self.module_type == other.module_type and \
                 self.tenant_id == other.tenant_id and \
-                self.every == other.every
+                self.every == other.every and \
+                self.callback == other.callback
 
         return False
 
@@ -342,14 +343,18 @@ class Module(object):
     def start(self):
         """Start worker."""
 
-        self.__periodic = \
-            tornado.ioloop.PeriodicCallback(self.run_once, self.every)
-        self.__periodic.start()
+        if self.every > 0:
+            self.__periodic = \
+                tornado.ioloop.PeriodicCallback(self.run_once, self.every)
+            self.__periodic.start()
+        else:
+            self.run_once
 
     def stop(self):
         """Stop worker."""
 
-        self.__periodic.stop()
+        if self.every > 0:
+            self.__periodic.stop()
 
     def run_once(self):
         """Period task."""
@@ -393,7 +398,8 @@ class ModuleTrigger(Module):
 
         if isinstance(other, Module):
             return self.module_type == other.module_type and \
-                self.tenant_id == other.tenant_id
+                self.tenant_id == other.tenant_id and \
+                self.callback == other.callback
 
         return False
 

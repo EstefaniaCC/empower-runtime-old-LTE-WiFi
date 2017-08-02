@@ -153,7 +153,6 @@ class LVAP(object):
         # change to the agent
         self._ssids = []
         self._encap = None
-        self._group = 6000
 
         # the following parameters can be updated by both agent and
         # controller. The controller sets them when a client successfully
@@ -175,7 +174,7 @@ class LVAP(object):
         self.rates = {}
 
         # virtual ports (VNFs)
-        self.__ports = {}
+        self.ports = {}
 
         # downlink intent uuid
         self.poa_uuid = None
@@ -183,8 +182,9 @@ class LVAP(object):
         # supported resource blocks
         self.supported = ResourcePool()
 
-        # target resource block when performing a handover
-        self.target_block = None
+        # this is set before clearing the DL blocks, so that the del_lvap
+        # message can be filled with the target block information
+        target_block = None
 
     def set_ports(self):
         """Set virtual ports.
@@ -194,22 +194,14 @@ class LVAP(object):
         property is made.
         """
 
-        # Delete all outgoing virtual link and then remove the entire port
-        if self.__ports:
-            self.__ports[0].clear()
-            del self.__ports[0]
-
-        if not self.wtp:
-            return
-
-        self.__ports[0] = VirtualPortLvap(phy_port=self.wtp.port(),
-                                          virtual_port_id=0,
-                                          lvap=self)
+        # Delete all outgoing virtual links
+        for port_id in self.ports:
+            self.ports[port_id].clear()
 
         # set/update intent
         intent = {'version': '1.0',
-                  'dpid': self.__ports[0].dpid,
-                  'port': self.__ports[0].ovs_port_id,
+                  'dpid': self.ports[0].dpid,
+                  'port': self.ports[0].ovs_port_id,
                   'hwaddr': self.addr}
 
         intent_server = RUNTIME.components[IntentServer.__module__]
@@ -218,12 +210,6 @@ class LVAP(object):
             intent_server.update_poa(intent, self.poa_uuid)
         else:
             self.poa_uuid = intent_server.add_poa(intent)
-
-    @property
-    def ports(self):
-        """Get the virtual ports."""
-
-        return self.__ports
 
     def refresh_lvap(self):
         """Send add lvap message on the selected port."""
@@ -235,22 +221,6 @@ class LVAP(object):
         for port in self.uplink.values():
             port.block.radio.connection.send_add_lvap(port.lvap, port.block,
                                                       self.uplink.SET_MASK)
-
-    @property
-    def group(self):
-        """Get the group."""
-
-        return self._group
-
-    @group.setter
-    def group(self, group):
-        """ Set the group. """
-
-        if self._group == group:
-            return
-
-        self._group = group
-        self.refresh_lvap()
 
     @property
     def encap(self):
@@ -392,14 +362,15 @@ class LVAP(object):
         # downlink block
         default_block = pool.pop()
 
-        print("TARGET_BLOCK", default_block)
-        print("CURRENT BLOCK", self.default_block)
-
+        # save target block
         self.target_block = default_block
 
         # clear downlink blocks
         for block in list(self._downlink.keys()):
             del self._downlink[block]
+
+        # reset target block
+        self.target_block = None
 
         # check if block is also in the uplink, if so remove it
         if default_block in self._uplink:
@@ -543,9 +514,6 @@ class LVAP(object):
     @wtp.setter
     def wtp(self, wtp):
         """Assigns LVAP to new wtp."""
-
-        if not self.default_block:
-            return None
 
         matching = wtp.supports & self.supported
         self.scheduled_on = matching.pop() if matching else None

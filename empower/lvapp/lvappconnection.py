@@ -63,6 +63,7 @@ from empower.lvapp import DEL_VAP
 from empower.core.tenant import T_TYPE_SHARED
 from empower.core.tenant import T_TYPE_UNIQUE
 from empower.core.utils import generate_bssid
+from empower.core.virtualport import VirtualPortLvap
 
 from empower.main import RUNTIME
 
@@ -302,24 +303,31 @@ class LVAPPConnection(object):
         lvap = LVAP(sta, net_bssid, net_bssid)
         lvap.set_ssids(list(ssids))
 
-        # This will trigger an LVAP ADD message (and REMOVE if necessary)
+        # Check if block is valid
         lvap.supported = ResourcePool()
         channel = request.channel
         band = request.band
         lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
 
         valid = wtp.supports & lvap.supported
+
         if not valid:
             LOG.warning("No valid intersection found. Ignoring request.")
             return
 
+        # Set default LVAP virtual port
+        lvap.ports[0] = VirtualPortLvap(phy_port=wtp.port(),
+                                        virtual_port_id=0,
+                                        lvap=lvap)
+
+        # This will trigger an LVAP ADD message (and REMOVE if necessary)
+        lvap.scheduled_on = valid
+
         # save LVAP in the runtime
         RUNTIME.lvaps[sta] = lvap
 
-        lvap.scheduled_on = valid
-
         LOG.info("Sending probe response to %s", lvap.addr)
-        self.send_probe_response(lvap)
+        self.send_probe_response(lvap, ssid)
 
     def _handle_auth_request(self, wtp, request):
         """Handle an incoming AUTH_REQUEST message.
@@ -545,6 +553,7 @@ class LVAPPConnection(object):
 
         if not match:
             LOG.error("Incoming block %s is invalid", lvap.supported)
+            wtp.connection.send_del_lvap(lvap)
             return
 
         block = match.pop()
@@ -552,22 +561,23 @@ class LVAPPConnection(object):
         # this will try to updated the lvap object with the resource block
         # coming in this status update message.
         try:
-
             if set_mask:
-
                 # set downlink+uplink block
                 lvap._downlink.setitem(block, RadioPort(lvap, block))
-
             else:
-
                 # set uplink only blocks
                 lvap._uplink.setitem(block, RadioPort(lvap, block))
-
         except ValueError:
             LOG.error("Error while importing block %s, removing.", block)
-            block.radio.connection.send_del_lvap(lvap)
+            wtp.connection.send_del_lvap(lvap)
             return
 
+        # update LVAP ports
+        lvap.ports[0] = VirtualPortLvap(phy_port=wtp.port(),
+                                        virtual_port_id=0,
+                                        lvap=lvap)
+
+        # update LVAP params
         lvap.authentication_state = bool(status.flags.authenticated)
         lvap.association_state = bool(status.flags.associated)
 
@@ -575,6 +585,7 @@ class LVAPPConnection(object):
         lvap._encap = EtherAddress(status.encap)
         ssids = [SSID(x.ssid) for x in status.ssids]
 
+        # update ssid
         if lvap.ssid:
 
             # Raise LVAP leave event
@@ -608,9 +619,6 @@ class LVAPPConnection(object):
 
         # update remaining ssids
         lvap._ssids = ssids[1:]
-
-        # set ports
-        lvap.set_ports()
 
         LOG.info("LVAP status %s", lvap)
 
@@ -836,7 +844,7 @@ class LVAPPConnection(object):
         msg = AUTH_RESPONSE.build(response)
         self.stream.write(msg)
 
-    def send_probe_response(self, lvap):
+    def send_probe_response(self, lvap, ssid):
         """Send a PROBE_RESPONSE message.
         Args:
             lvap: an LVAP object
@@ -850,7 +858,8 @@ class LVAPPConnection(object):
                              type=PT_PROBE_RESPONSE,
                              length=16,
                              seq=self.wtp.seq,
-                             sta=lvap.addr.to_raw())
+                             sta=lvap.addr.to_raw(),
+                             ssid=ssid.to_raw())
 
         msg = PROBE_RESPONSE.build(response)
         self.stream.write(msg)
@@ -865,37 +874,27 @@ class LVAPPConnection(object):
             TypeError: if lvap is not an LVAP object.
         """
 
-        print("SEND DEL LVAP")
-        print("target hwaddr", lvap.target_block)
-        print("current hwaddr", lvap.default_block)
-        target_hwaddr = lvap.target_block.hwaddr if lvap.target_block != None else lvap.default_block.hwaddr
-        target_channel = lvap.target_block.channel if lvap.target_block != None else lvap.default_block.channel
+        target_block = lvap.target_block
 
-        csa_active = False
-        csa_switch_mode = 1
-        csa_switch_count = 10
+        target_hwaddr = EtherAddress.bcast()
+        target_channel = 0
+        target_band = 0
 
-
-        if lvap.target_block and lvap.target_block != lvap.downlink and target_channel != lvap.default_block.channel:
-            print("CSA ACTIVE TRUE")
-            csa_active = True
-
-        csa_flags = Container(csa_active=csa_active)
-
-        print(target_hwaddr)
-        print(target_channel)
-        print("CSA FLAGS", csa_flags)
+        if target_block:
+            target_hwaddr = target_block.hwaddr
+            target_channel = target_block.channel
+            target_band = target_block.band
 
         del_lvap = Container(version=PT_VERSION,
                              type=PT_DEL_LVAP,
                              length=26,
                              seq=self.wtp.seq,
                              sta=lvap.addr.to_raw(),
-                             csa_flags=csa_flags,
-                             csa_hwaddr=target_hwaddr.to_raw(),
-                             csa_channel=target_channel,
-                             csa_switch_mode=csa_switch_mode,
-                             csa_switch_count=csa_switch_count)
+                             target_hwaddr=target_block.hwaddr.to_raw(),
+                             target_channel=target_block.channel,
+                             tagert_band=target_block.band,
+                             csa_switch_mode=0,
+                             csa_switch_count=0)
 
         msg = DEL_LVAP.build(del_lvap)
         self.stream.write(msg)
@@ -956,25 +955,15 @@ class LVAPPConnection(object):
         if lvap.encap:
             encap = lvap.encap
 
-        print("SEND ADD LVAP")
-        print("BLOCK", block)
-        print("channel", block.channel)
-
-        lvap_block = next(iter(lvap.supported))
-        lvap_band = lvap_block.band
-
-
         add_lvap = Container(version=PT_VERSION,
                              type=PT_ADD_LVAP,
-                             length=49,
+                             length=46,
                              seq=self.wtp.seq,
-                             group=lvap.group,
                              flags=flags,
                              assoc_id=lvap.assoc_id,
                              hwaddr=block.hwaddr.to_raw(),
                              channel=block.channel,
                              band=block.band,
-                             lvap_band=lvap_band,
                              sta=lvap.addr.to_raw(),
                              encap=encap.to_raw(),
                              net_bssid=lvap.net_bssid.to_raw(),
