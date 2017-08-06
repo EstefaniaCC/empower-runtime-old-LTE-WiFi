@@ -321,7 +321,7 @@ class LVAPPConnection(object):
                                         lvap=lvap)
 
         # This will trigger an LVAP ADD message (and REMOVE if necessary)
-        lvap.scheduled_on = valid
+        lvap.scheduled_on = valid.pop()
 
         # save LVAP in the runtime
         RUNTIME.lvaps[sta] = lvap
@@ -524,30 +524,29 @@ class LVAPPConnection(object):
             LOG.info("Status from disconnected WTP %s", wtp.addr)
             return
 
-        sta_addr = EtherAddress(status.sta)
+        sta = EtherAddress(status.sta)
         set_mask = bool(status.flags.set_mask)
 
         lvap = None
 
-        LOG.info("LVAP status update from %s", sta_addr)
+        LOG.info("LVAP status update from %s", sta)
 
         # If the LVAP does not exists, then create a new one
-        if sta_addr not in RUNTIME.lvaps:
+        if sta not in RUNTIME.lvaps:
 
             net_bssid_addr = EtherAddress(status.net_bssid)
             lvap_bssid_addr = EtherAddress(status.lvap_bssid)
-            lvap = LVAP(sta_addr, net_bssid_addr, lvap_bssid_addr)
+            lvap = LVAP(sta, net_bssid_addr, lvap_bssid_addr)
 
-            RUNTIME.lvaps[sta_addr] = lvap
+            RUNTIME.lvaps[sta] = lvap
 
-        lvap = RUNTIME.lvaps[sta_addr]
+        lvap = RUNTIME.lvaps[sta]
 
         # incoming block
         lvap.supported = ResourcePool()
-        hwaddr = EtherAddress(status.hwaddr)
         channel = status.channel
         band = status.band
-        lvap.supported.add(ResourceBlock(lvap, hwaddr, channel, band))
+        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
 
         match = wtp.supports & lvap.supported
 
@@ -563,11 +562,17 @@ class LVAPPConnection(object):
         try:
             if set_mask:
                 # set downlink+uplink block
+                # if radios are then same this is the result of a band steering
+                # remove default block and replace with new one
+                if lvap.default_block.radio == block.radio:
+                    LOG.info("YESSSSSSSS")
+                    lvap._downlink.delitem(lvap.default_block)
                 lvap._downlink.setitem(block, RadioPort(lvap, block))
             else:
                 # set uplink only blocks
                 lvap._uplink.setitem(block, RadioPort(lvap, block))
-        except ValueError:
+        except Exception as e:
+            LOG.exception(e)
             LOG.error("Error while importing block %s, removing.", block)
             wtp.connection.send_del_lvap(lvap)
             return

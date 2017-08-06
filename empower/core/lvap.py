@@ -170,9 +170,6 @@ class LVAP(object):
         self.tx_samples = []
         self.rx_samples = []
 
-        # rates statistics
-        self.rates = {}
-
         # virtual ports (VNFs)
         self.ports = {}
 
@@ -426,6 +423,10 @@ class LVAP(object):
         downlink = ResourcePool(list(self._downlink.keys()))
         pool = pool - downlink
 
+        # make sure if specified block is not at the same wtp of the current
+        # downlink block, in this case remove it
+        pool = pool - self.default_block.radio.supports
+
         # clear uplink blocks
         for block in list(self._uplink.keys()):
             del self._uplink[block]
@@ -534,7 +535,6 @@ class LVAP(object):
                 'encap': self.encap,
                 'tx_samples': self.tx_samples,
                 'rx_samples': self.rx_samples,
-                'rates': self.rates,
                 'authentication_state': self.authentication_state,
                 'association_state': self.association_state}
 

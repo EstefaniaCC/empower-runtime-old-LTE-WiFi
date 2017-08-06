@@ -318,6 +318,8 @@ class ResourceBlock(object):
         self._band = band
         self.ucqm = CQM()
         self.ncqm = CQM()
+        self.rates = {}
+        self.busyness = None
         self.tx_policies = TxPolicyProp(self)
         self._supports = set()
         self._ht_supports = set()
@@ -458,6 +460,8 @@ class ResourceBlock(object):
                 'ht_supports': sorted(self.ht_supports),
                 'tx_policies': tx_policies,
                 'band': BANDS[self.band],
+                'rates': self.rates,
+                'busyness': self.busyness,
                 'ucqm': {str(k): v for k, v in self.ucqm.items()},
                 'ncqm': {str(k): v for k, v in self.ncqm.items()}}
 
