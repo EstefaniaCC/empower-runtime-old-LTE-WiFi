@@ -409,13 +409,41 @@ class ResourceBlock(object):
 
         return self._channel
 
+    @channel.setter
     def channel(self, channel):
         """ Set the band. """
+
+        # if channel < 1 or channel > 165:
+        #     raise ValueError("Invalid channel %u" % channel)
+
+        # print("++++++++++++++++++++++++++++++++++++++++++++++")
+        # print("++++++++++++++++++++++++++++++++++++++++++++++")
+
+        initial_channel = self.channel
+
+        # print("Channel change from %d to %d"%(initial_channel, channel))
+        # print("++++++++++++++++++++++++++++++++++++++++++++++")
+        # print("++++++++++++++++++++++++++++++++++++++++++++++")
+
+        # print("sending request to the ap")
+        self.radio.connection.send_channel_switch_request(channel, self.hwaddr, initial_channel, self.band)
+
+        # self._channel = channel
+
+        # lvaps = RUNTIME.lvaps
+
+        # for lvap in lvaps.values():
+        #     if lvap.default_block.addr != self.addr:
+        #         continue
+        #     lvap.clear_downlink()
+        #     lvap.clear_uplink()
+        #     lvap.scheduled_on = self
 
         if channel < 1 or channel > 165:
             raise ValueError("Invalid channel %u" % channel)
 
         self._channel = channel
+
 
     def to_dict(self):
         """ Return a JSON-serializable dictionary representing the Resource
