@@ -114,7 +114,13 @@ class WifiLoadBalancing(EmpowerApp):
     def lvap_join_callback(self, lvap):
         """Called when an joins the network."""
 
-        self.update_counters(lvap)
+        self.bin_counter(lvap=lvap.addr,
+                 every=500,
+                 callback=self.counters_callback)
+
+        self.lvap_stats(lvap=lvap.addr, 
+                    every=500, 
+                    callback=self.lvap_stats_callback)
 
         if lvap.addr.to_str() not in self.aps_clients_rel[lvap.default_block.addr.to_str()]:
             self.aps_clients_rel[lvap.default_block.addr.to_str()].append(lvap.addr.to_str())
@@ -192,7 +198,8 @@ class WifiLoadBalancing(EmpowerApp):
         new_occupancy < (self.old_aps_occupancy[lvap.default_block.addr.to_str()] * 0.975) or \
         new_occupancy > (self.old_aps_occupancy[lvap.default_block.addr.to_str()] * 1.025):
             self.old_aps_occupancy[lvap.default_block.addr.to_str()] = new_occupancy
-            self.evalute_lvap_scheduling(lvap)
+            if lvap not in self.handover_occupancies:
+                self.evaluate_lvap_scheduling(lvap)
 
     def counters_callback(self, stats):
         """ New stats available. """
@@ -295,12 +302,14 @@ class WifiLoadBalancing(EmpowerApp):
                 del self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]
                 self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
             self.wifi_data[key]['revert_attempts'] = 0
-            self.evalute_lvap_revert(lvap)
+            if lvap not in self.handover_occupancies:
+                self.evaluate_lvap_revert(lvap)
         elif self.wifi_data[key]['reesched_attempts'] >= 5:
             self.wifi_data[key]['reesched_attempts'] = 0
             self.old_aps_occupancy[block.addr.to_str()] = new_occupancy
             #if self.nb_app_active[block.addr.to_str()] > 1:
-            self.evalute_lvap_scheduling(lvap)
+            if lvap not in self.handover_occupancies:
+                self.evaluate_lvap_scheduling(lvap)
 
     def counters_to_file(self, lvap, block, summary):
         """ New stats available. """
@@ -371,7 +380,7 @@ class WifiLoadBalancing(EmpowerApp):
         return global_occupancy
 
 
-    def evalute_lvap_revert(self, lvap):
+    def evaluate_lvap_revert(self, lvap):
 
         block = lvap.default_block
 
@@ -402,12 +411,8 @@ class WifiLoadBalancing(EmpowerApp):
         print("++++++++ Transfering inactive LVAP from %s to %s++++++++" %(block.addr.to_str(), new_block.addr.to_str()))
         print("current_rssi %d. Target rssi %d" % (current_rssi, best_rssi))
 
-        
-
-        
-
-        self.delete_bincounter_worker(lvap)
-        self.delete_lvap_stats_worker(lvap)
+        if lvap.default_block == new_block:
+            return 
         
         lvap.scheduled_on = new_block
 
@@ -419,10 +424,8 @@ class WifiLoadBalancing(EmpowerApp):
         self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
         self.update_occupancy_ratio(new_block)
 
-        self.update_counters(lvap)
 
-
-    def evalute_lvap_scheduling(self, lvap):
+    def evaluate_lvap_scheduling(self, lvap):
 
         block = lvap.default_block
 
@@ -434,9 +437,9 @@ class WifiLoadBalancing(EmpowerApp):
         new_block = None
         clients_candidates = {}
 
-        # print("/////////////// Evaluating lvap reescheduling %s ///////////////" % lvap.addr.to_str())
-        # print("average_occupancy", average_occupancy)
-        # print("self.aps_occupancy[block.addr.to_str()]", self.aps_occupancy[block.addr.to_str()])
+        print("/////////////// Evaluating lvap reescheduling %s ///////////////" % lvap.addr.to_str())
+        print("average_occupancy", average_occupancy)
+        print("self.aps_occupancy[block.addr.to_str()]", self.aps_occupancy[block.addr.to_str()])
         if self.aps_occupancy[block.addr.to_str()] <= average_occupancy: # or self.nb_app_active[block.addr.to_str()] < 2:
             return
 
@@ -544,8 +547,8 @@ class WifiLoadBalancing(EmpowerApp):
                 'handover_time': time.time()
             }
 
-        self.delete_bincounter_worker(new_lvap)
-        self.delete_lvap_stats_worker(new_lvap)
+        if new_lvap.default_block == new_block:
+            return
         
         new_lvap.scheduled_on = new_block
 
@@ -556,8 +559,6 @@ class WifiLoadBalancing(EmpowerApp):
 
         self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
         self.update_occupancy_ratio(new_block)
-
-        self.update_counters(new_lvap)
 
 
     def transfer_block_data(self, src_block, dst_block, lvap):
@@ -715,11 +716,11 @@ class WifiLoadBalancing(EmpowerApp):
 
             # If the previous occupancy rate was better, the handover must be reverted
             if value['previous_occupancy'] < handover_occupancy_rate:
-                self.log.info("The handover from the AP %s to the AP %s for the client %s IS NOT efficient. The previous channel occupancy rate was %d(ms) and it is %d(ms) after the handover. It is going to be reverted" \
+                self.log.info("The handover from the AP %s to the AP %s for the client %s IS NOT efficient. The previous channel occupancy rate was %f(ms) and it is %f(ms) after the handover. It is going to be reverted" \
                     %(value['old_ap'], value['handover_ap'], lvap, value['previous_occupancy'], handover_occupancy_rate))
                 self.revert_handover(lvap, handover_occupancy_rate)
             else:
-                self.log.info("The handover from the AP %s to the AP %s for the client %s is efficient. The previous channel occupancy rate was %d(ms) and it is %d(ms) after the handover" \
+                self.log.info("The handover from the AP %s to the AP %s for the client %s is efficient. The previous channel occupancy rate was %f(ms) and it is %f(ms) after the handover" \
                     %(value['old_ap'], value['handover_ap'], lvap, value['previous_occupancy'], handover_occupancy_rate)) 
 
         for entry in checked_clients:
@@ -745,10 +746,9 @@ class WifiLoadBalancing(EmpowerApp):
                 'handover_ap': handover_ap.addr.to_str(),
             }
 
+        if lvap.default_block == old_ap:
+            return
 
-        self.delete_bincounter_worker(lvap)
-        self.delete_lvap_stats_worker(lvap)
-        
         lvap.scheduled_on = old_ap
 
         self.transfer_block_data(handover_ap, old_ap, lvap)
@@ -758,37 +758,6 @@ class WifiLoadBalancing(EmpowerApp):
 
         self.nb_app_active[old_ap.addr.to_str()] = len(self.bitrate_data_active[old_ap.addr.to_str()])
         self.update_occupancy_ratio(old_ap)
-
-        self.update_counters(lvap)
-
-    def delete_bincounter_worker(self, lvap):
-        worker = RUNTIME.components[BinCounterWorker.__module__]
-
-        for module_id in list(worker.modules.keys()):
-            bincounter_mod = worker.modules[module_id]
-            if lvap == bincounter_mod.lvap:
-                worker.remove_module(module_id)
-
-    def delete_lvap_stats_worker(self, lvap):
-        worker = RUNTIME.components[LVAPStatsWorker.__module__]
-
-        for module_id in list(worker.modules.keys()):
-            lvap_stats_mod = worker.modules[module_id]
-            if lvap == lvap_stats_mod.lvap:
-                worker.remove_module(module_id)
-
-    def update_counters(self, lvap):
-
-        print("******************** UPDATING COUNTERS")
-
-        self.bin_counter(lvap=lvap.addr,
-                 every=500,
-                 callback=self.counters_callback)
-
-        self.lvap_stats(lvap=lvap.addr, 
-                    every=500, 
-                    callback=self.lvap_stats_callback)
-
 
     def loop(self):
         """ Periodic job. """
