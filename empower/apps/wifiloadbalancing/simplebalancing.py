@@ -285,7 +285,8 @@ class WifiLoadBalancing(EmpowerApp):
         if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
         new_occupancy < (self.old_aps_occupancy[block.addr.to_str()] * 0.975) or \
         new_occupancy > (self.old_aps_occupancy[block.addr.to_str()] * 1.025):
-            self.wifi_data[key]['reesched_attempts'] += 1
+            if len(self.stations_aps_matrix[lvap.addr.to_str()]) > 1:
+                self.wifi_data[key]['reesched_attempts'] += 1
 
         self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
 
@@ -734,21 +735,29 @@ class WifiLoadBalancing(EmpowerApp):
 
         if lvap.addr.to_str() not in self.unsuccessful_handovers:
             self.unsuccessful_handovers[lvap.addr.to_str()] = {}
-        if handover_ap.addr.to_str() not in self.unsuccessful_handovers:
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()] = {}
 
-        self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()] = \
-            {
-                'rssi': self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi'],
-                'previous_occupancy': handover_occupancy_rate,
-                'handover_retries': 0,
-                'old_ap': old_ap.addr.to_str(),
-                'handover_ap': handover_ap.addr.to_str(),
-            }
+        if handover_ap.addr.to_str() not in self.unsuccessful_handovers[lvap.addr.to_str()]:
+            self.unsuccessful_handovers[lvap.addr.to_str()] = \
+                {
+                    handover_ap.addr.to_str(): {
+                        'rssi': self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi'],
+                        'previous_occupancy': handover_occupancy_rate,
+                        'handover_retries': 0,
+                        'old_ap': old_ap.addr.to_str(),
+                        'handover_ap': handover_ap.addr.to_str()
+                    }
+                }
+        else:
+            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['rssi'] = self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi']
+            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['previous_occupancy'] = handover_occupancy_rate
+            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_retries'] = 0
+            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['old_ap'] = old_ap.addr.to_str()
+            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_ap'] = handover_ap.addr.to_str()
 
         if lvap.default_block == old_ap:
             return
 
+        print("------------------------ Reverting handover from %s to %s" %(handover_ap.addr.to_str(), old_ap.addr.to_str()))
         lvap.scheduled_on = old_ap
 
         self.transfer_block_data(handover_ap, old_ap, lvap)

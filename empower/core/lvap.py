@@ -185,7 +185,6 @@ class LVAP(object):
 
     def set_ports(self):
         """Set virtual ports.
-
         This method is called everytime an LVAP is moved to another WTP. More
         preciselly it is called every time an assignment to the downlink
         property is made.
