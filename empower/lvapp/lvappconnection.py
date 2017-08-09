@@ -25,7 +25,6 @@ from construct import Container
 from empower.datatypes.etheraddress import EtherAddress
 from empower.datatypes.ssid import SSID
 from empower.core.resourcepool import ResourceBlock
-from empower.core.resourcepool import ResourcePool
 from empower.core.resourcepool import BT_L20
 from empower.core.radioport import RadioPort
 from empower.lvapp import HEADER
@@ -53,6 +52,8 @@ from empower.lvapp import PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
 from empower.lvapp import CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
 from empower.lvapp import PT_UPDATE_WTP_CHANNEL
 from empower.lvapp import UPDATE_WTP_CHANNEL
+from empower.lvapp import PT_ADD_LVAP_RESPONSE
+from empower.lvapp import PT_DEL_LVAP_RESPONSE
 from empower.core.lvap import LVAP
 from empower.core.networkport import NetworkPort
 from empower.core.vap import VAP
@@ -170,11 +171,13 @@ class LVAPPConnection(object):
     def _trigger_message(self, msg_type):
 
         if msg_type not in self.server.pt_types:
-
             LOG.error("Unknown message type %u", msg_type)
             return
 
         if self.server.pt_types[msg_type]:
+
+            LOG.error("Got message type %u (%s)", msg_type,
+                      self.server.pt_types[msg_type].name)
 
             msg = self.server.pt_types[msg_type].parse(self.__buffer)
             addr = EtherAddress(msg.wtp)
@@ -195,6 +198,44 @@ class LVAPPConnection(object):
             if msg_type in self.server.pt_types_handlers:
                 for handler in self.server.pt_types_handlers[msg_type]:
                     handler(msg)
+
+    def _handle_add_del_lvap(self, wtp, status):
+        """Handle an incoming ADD_DEL_LVAP message.
+        Args:
+            status, a ADD_DEL_LVAP message
+        Returns:
+            None
+        """
+
+        if not wtp.connection:
+            LOG.info("Add/del response from disconnected WTP %s", wtp.addr)
+            return
+
+        if status.type == PT_ADD_LVAP_RESPONSE:
+            msg_subtype = "add_lvap"
+        else:
+            msg_subtype = "del_lvap"
+
+        LOG.info("%s from %s WTP %s module_id %u status %u", msg_subtype,
+                 EtherAddress(status.sta), EtherAddress(status.wtp),
+                 status.module_id, status.status)
+
+        sta = EtherAddress(status.sta)
+
+        if sta not in RUNTIME.lvaps:
+            LOG.info("Add/del response from unknown LVAP %s", sta)
+            return
+
+        lvap = RUNTIME.lvaps[sta]
+
+        if status.module_id in lvap.pending:
+            LOG.info("LVAP %s, pending module id %s found. Removing.",
+                     lvap.addr, status.module_id)
+            idx = lvap.pending.index(status.module_id)
+            del lvap.pending[idx]
+        else:
+            LOG.info("LVAP %s, pending module id %s not found. Ignoring.",
+                     lvap.addr, status.module_id)
 
     def _handle_hello(self, wtp, hello):
         """Handle an incoming HELLO message.
@@ -303,13 +344,14 @@ class LVAPPConnection(object):
         lvap = LVAP(sta, net_bssid, net_bssid)
         lvap.set_ssids(list(ssids))
 
-        # Check if block is valid
-        lvap.supported = ResourcePool()
-        channel = request.channel
-        band = request.band
-        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
+        # set supported band
+        lvap.supported_band = request.supported_band
 
-        valid = wtp.supports & lvap.supported
+        # Check if block is valid
+        incoming = ResourceBlock(wtp, EtherAddress(request.hwaddr),
+                                 request.channel, request.band)
+
+        valid = [block for block in wtp.supports if block == incoming]
 
         if not valid:
             LOG.warning("No valid intersection found. Ignoring request.")
@@ -321,7 +363,7 @@ class LVAPPConnection(object):
                                         lvap=lvap)
 
         # This will trigger an LVAP ADD message (and REMOVE if necessary)
-        lvap.scheduled_on = valid.pop()
+        lvap.blocks = valid[0]
 
         # save LVAP in the runtime
         RUNTIME.lvaps[sta] = lvap
@@ -446,11 +488,8 @@ class LVAPPConnection(object):
         # this will trigger an add lvap message to update the ssid
         lvap.tenant = RUNTIME.load_tenant(tenant_name)
 
-        # update supported blocks field
-        lvap.supported = ResourcePool()
-        channel = request.channel
-        band = request.band
-        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
+        # set supported band
+        lvap.supported_band = request.supported_band
 
         # this will trigger an add lvap message to update the assoc id
         lvap.assoc_id = self.server.assoc_id
@@ -497,7 +536,7 @@ class LVAPPConnection(object):
         self.wtp.last_seen = 0
         self.wtp.connection = None
         self.wtp.ports = {}
-        self.wtp.supports = ResourcePool()
+        self.wtp.supports = set()
         self.wtp = None
 
     def send_bye_message_to_self(self):
@@ -529,7 +568,41 @@ class LVAPPConnection(object):
 
         lvap = None
 
-        LOG.info("LVAP status update from %s at wtp %s", sta, wtp.addr)
+        accum = []
+        incoming_ssids = [SSID(x.ssid) for x in status.ssids]
+
+        accum.append("addr ")
+        accum.append(EtherAddress(status.sta).to_str())
+        accum.append(" net_bssid ")
+        accum.append(EtherAddress(status.net_bssid).to_str())
+        accum.append(" lvap_bssid ")
+        accum.append(EtherAddress(status.lvap_bssid).to_str())
+
+        accum.append(" ssid ")
+
+        if incoming_ssids[0]:
+            accum.append(incoming_ssids[0].to_str())
+        else:
+            accum.append("None")
+
+        accum.append(" ssids [")
+
+        for ssid in incoming_ssids[1:]:
+            accum.append(" ")
+            accum.append(ssid.to_str())
+
+        accum.append(" ]")
+
+        accum.append(" assoc_id ")
+        accum.append(str(status.assoc_id))
+
+        if bool(status.flags.authenticated):
+            accum.append(" AUTH")
+
+        if bool(status.flags.associated):
+            accum.append(" ASSOC")
+
+        LOG.info("LVAP status %s", ''.join(accum))
 
         # If the LVAP does not exists, then create a new one
         if sta not in RUNTIME.lvaps:
@@ -542,37 +615,29 @@ class LVAPPConnection(object):
 
         lvap = RUNTIME.lvaps[sta]
 
-        # incoming block
-        lvap.supported = ResourcePool()
-        channel = status.channel
-        band = status.band
-        lvap.supported.add(ResourceBlock(lvap, sta, channel, band))
+        # Check if block is valid
+        incoming = ResourceBlock(wtp, EtherAddress(status.hwaddr),
+                                 status.channel, status.band)
 
-        match = wtp.supports & lvap.supported
+        valid = [block for block in wtp.supports if block == incoming]
 
-        if not match:
-            LOG.error("Incoming block %s is invalid", lvap.supported)
+        if not valid:
+            LOG.warning("No valid intersection found. Removing block.")
             wtp.connection.send_del_lvap(lvap)
             return
-
-        block = match.pop()
 
         # this will try to updated the lvap object with the resource block
         # coming in this status update message.
         try:
             if set_mask:
                 # set downlink+uplink block
-                # if radios are then same this is the result of a band steering
-                # remove default block and replace with new one
-                default_block = lvap.default_block
-                if default_block and default_block.radio == block.radio:
-                    lvap._downlink.delitem(lvap.default_block)
-                lvap._downlink.setitem(block, RadioPort(lvap, block))
+                lvap._downlink.setitem(valid[0], RadioPort(lvap, valid[0]))
             else:
                 # set uplink only blocks
-                lvap._uplink.setitem(block, RadioPort(lvap, block))
+                lvap._uplink.setitem(valid[0], RadioPort(lvap, valid[0]))
         except Exception as e:
-            LOG.error("Error while importing block %s, removing.", block)
+            LOG.exception(e)
+            LOG.error("Error while importing block %s, removing.", valid[0])
             wtp.connection.send_del_lvap(lvap)
             return
 
@@ -580,6 +645,9 @@ class LVAPPConnection(object):
         lvap.ports[0] = VirtualPortLvap(phy_port=wtp.port(),
                                         virtual_port_id=0,
                                         lvap=lvap)
+
+        # set supported band
+        lvap.supported_band = status.supported_band
 
         # update LVAP params
         lvap.authentication_state = bool(status.flags.authenticated)
@@ -600,7 +668,7 @@ class LVAPPConnection(object):
                 LOG.info("Removing %s from tenant %s", lvap.addr, lvap.ssid)
                 del lvap.tenant.lvaps[lvap.addr]
 
-        lvap._tenant = None
+            lvap._tenant = None
 
         if ssids[0]:
 
@@ -624,8 +692,6 @@ class LVAPPConnection(object):
         # update remaining ssids
         lvap._ssids = ssids[1:]
 
-        LOG.info("LVAP status %s", lvap)
-
     @classmethod
     def _handle_status_port(cls, wtp, status):
         """Handle an incoming PORT message.
@@ -640,20 +706,18 @@ class LVAPPConnection(object):
             return
 
         sta_addr = EtherAddress(status.sta)
-        hwaddr = EtherAddress(status.hwaddr)
-        block = ResourceBlock(wtp, hwaddr, status.channel, status.band)
 
         # incoming block
-        pool = ResourcePool()
-        pool.add(block)
+        incoming = ResourceBlock(wtp, EtherAddress(status.hwaddr),
+                                 status.channel, status.band)
 
-        match = wtp.supports & pool
+        valid = [block for block in wtp.supports if block == incoming]
 
-        if not match:
-            LOG.error("Incoming block %s is invalid", block)
+        if not valid:
+            LOG.error("Incoming block %s is invalid", incoming)
             return
 
-        block = match.pop()
+        block = valid[0]
 
         LOG.info("Port status from %s, station %s", wtp.addr, sta_addr)
 
@@ -746,16 +810,14 @@ class LVAPPConnection(object):
             LOG.info("VAP %s from unknown tenant %s", net_bssid_addr, ssid)
             return
 
-        vap = None
-        hwaddr = EtherAddress(status.hwaddr)
-        block = ResourceBlock(wtp, hwaddr, status.channel, status.band)
-        ssid = status.ssid
+        incoming = ResourceBlock(wtp, EtherAddress(status.hwaddr),
+                                 status.channel, status.band)
 
         LOG.info("VAP status update from %s", net_bssid_addr)
 
         # If the VAP does not exists, then create a new one
         if net_bssid_addr not in tenant.vaps:
-            vap = VAP(net_bssid_addr, block, wtp, tenant)
+            vap = VAP(net_bssid_addr, incoming, wtp, tenant)
             tenant.vaps[net_bssid_addr] = vap
 
         vap = tenant.vaps[net_bssid_addr]
@@ -860,7 +922,7 @@ class LVAPPConnection(object):
 
         response = Container(version=PT_VERSION,
                              type=PT_PROBE_RESPONSE,
-                             length=16,
+                             length=16 + len(ssid.to_raw()),
                              seq=self.wtp.seq,
                              sta=lvap.addr.to_raw(),
                              ssid=ssid.to_raw())
@@ -891,8 +953,9 @@ class LVAPPConnection(object):
 
         del_lvap = Container(version=PT_VERSION,
                              type=PT_DEL_LVAP,
-                             length=26,
+                             length=30,
                              seq=self.wtp.seq,
+                             module_id=lvap.module_id,
                              sta=lvap.addr.to_raw(),
                              target_hwaddr=target_hwaddr.to_raw(),
                              target_channel=target_channel,
@@ -963,13 +1026,15 @@ class LVAPPConnection(object):
 
         add_lvap = Container(version=PT_VERSION,
                              type=PT_ADD_LVAP,
-                             length=46,
+                             length=51,
                              seq=self.wtp.seq,
+                             module_id=lvap.module_id,
                              flags=flags,
                              assoc_id=lvap.assoc_id,
                              hwaddr=block.hwaddr.to_raw(),
                              channel=block.channel,
                              band=block.band,
+                             supported_band=lvap.supported_band,
                              sta=lvap.addr.to_raw(),
                              encap=encap.to_raw(),
                              net_bssid=lvap.net_bssid.to_raw(),

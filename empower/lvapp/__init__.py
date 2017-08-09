@@ -52,6 +52,8 @@ PT_CAPS = 0x16
 PT_ADD_VAP = 0x31
 PT_DEL_VAP = 0x32
 PT_STATUS_VAP = 0x33
+PT_ADD_LVAP_RESPONSE = 0x50
+PT_DEL_LVAP_RESPONSE = 0x51
 
 PT_INCOM_MCAST_REQUEST = 0x38
 PT_INCOM_MCAST_RESPONSE = 0x39
@@ -82,7 +84,8 @@ PROBE_REQUEST = Struct("probe_request", UBInt8("version"),
                        Bytes("hwaddr", 6),
                        UBInt8("channel"),
                        UBInt8("band"),
-                       Bytes("ssid", lambda ctx: ctx.length - 30))
+                       UBInt8("supported_band"),
+                       Bytes("ssid", lambda ctx: ctx.length - 31))
 
 PROBE_RESPONSE = Struct("probe_response", UBInt8("version"),
                         UBInt8("type"),
@@ -116,7 +119,8 @@ ASSOC_REQUEST = \
            Bytes("hwaddr", 6),
            UBInt8("channel"),
            UBInt8("band"),
-           Bytes("ssid", lambda ctx: ctx.length - 36))
+           UBInt8("supported_band"),
+           Bytes("ssid", lambda ctx: ctx.length - 37))
 
 ASSOC_RESPONSE = Struct("assoc_response", UBInt8("version"),
                         UBInt8("type"),
@@ -128,6 +132,7 @@ ADD_LVAP = Struct("add_lvap", UBInt8("version"),
                   UBInt8("type"),
                   UBInt32("length"),
                   UBInt32("seq"),
+                  UBInt32("module_id"),
                   BitStruct("flags", Padding(13),
                             Bit("set_mask"),
                             Bit("associated"),
@@ -136,6 +141,7 @@ ADD_LVAP = Struct("add_lvap", UBInt8("version"),
                   Bytes("hwaddr", 6),
                   UBInt8("channel"),
                   UBInt8("band"),
+                  UBInt8("supported_band"),
                   Bytes("sta", 6),
                   Bytes("encap", 6),
                   Bytes("net_bssid", 6),
@@ -146,6 +152,7 @@ DEL_LVAP = Struct("del_lvap", UBInt8("version"),
                   UBInt8("type"),
                   UBInt32("length"),
                   UBInt32("seq"),
+                  UBInt32("module_id"),
                   Bytes("sta", 6),
                   Bytes("target_hwaddr", 6),
                   UBInt8("target_channel"),
@@ -168,6 +175,7 @@ STATUS_LVAP = Struct("status_lvap", UBInt8("version"),
                      Bytes("hwaddr", 6),
                      UBInt8("channel"),
                      UBInt8("band"),
+                     UBInt8("supported_band"),
                      Bytes("net_bssid", 6),
                      Bytes("lvap_bssid", 6),
                      SSIDS)
@@ -255,6 +263,7 @@ STATUS_VAP = Struct("status_vap", UBInt8("version"),
                     Bytes("net_bssid", 6),
                     Bytes("ssid", lambda ctx: ctx.length - 30))
 
+<<<<<<< HEAD
 INCOM_MCAST_REQUEST = Struct("incom_mcast_addr", UBInt8("version"),
                     UBInt8("type"),
                     UBInt32("length"),
@@ -289,6 +298,16 @@ UPDATE_WTP_CHANNEL =  Struct("channel_switch_request", UBInt8("version"),
                        Bytes("hwaddr", 6),
                        UBInt8("old_channel"),
                        UBInt8("band"))
+=======
+ADD_DEL_LVAP_RESPONSE = Struct("add_del_lvap", UBInt8("version"),
+                               UBInt8("type"),
+                               UBInt32("length"),
+                               UBInt32("seq"),
+                               Bytes("wtp", 6),
+                               Bytes("sta", 6),
+                               UBInt32("module_id"),
+                               UBInt32("status"))
+>>>>>>> upstream/master
 
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
@@ -311,7 +330,9 @@ PT_TYPES = {PT_BYE: None,
             PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
             PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE,
             PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
-            PT_UPDATE_WTP_CHANNEL: UPDATE_WTP_CHANNEL}
+            PT_UPDATE_WTP_CHANNEL: UPDATE_WTP_CHANNEL,
+            PT_ADD_LVAP_RESPONSE: ADD_DEL_LVAP_RESPONSE,
+            PT_DEL_LVAP_RESPONSE: ADD_DEL_LVAP_RESPONSE}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -334,4 +355,6 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_INCOM_MCAST_REQUEST: [],
                      PT_INCOM_MCAST_RESPONSE: [], 
                      PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: [],
-                     PT_UPDATE_WTP_CHANNEL: []}
+                     PT_UPDATE_WTP_CHANNEL: [],
+                     PT_ADD_LVAP_RESPONSE: [],
+                     PT_DEL_LVAP_RESPONSE: []}
