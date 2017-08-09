@@ -44,14 +44,6 @@ from empower.lvapp import PT_DEL_LVAP
 from empower.lvapp import DEL_LVAP
 from empower.lvapp import PT_PROBE_RESPONSE
 from empower.lvapp import PROBE_RESPONSE
-from empower.lvapp import PT_INCOM_MCAST_REQUEST
-from empower.lvapp import INCOM_MCAST_REQUEST
-from empower.lvapp import PT_INCOM_MCAST_RESPONSE
-from empower.lvapp import INCOM_MCAST_RESPONSE
-from empower.lvapp import PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
-from empower.lvapp import CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP
-from empower.lvapp import PT_UPDATE_WTP_CHANNEL
-from empower.lvapp import UPDATE_WTP_CHANNEL
 from empower.lvapp import PT_ADD_LVAP_RESPONSE
 from empower.lvapp import PT_DEL_LVAP_RESPONSE
 from empower.core.lvap import LVAP
@@ -59,10 +51,10 @@ from empower.core.networkport import NetworkPort
 from empower.core.vap import VAP
 from empower.lvapp import PT_ADD_VAP
 from empower.lvapp import ADD_VAP
-from empower.lvapp import PT_DEL_VAP
-from empower.lvapp import DEL_VAP
 from empower.core.tenant import T_TYPE_SHARED
 from empower.core.tenant import T_TYPE_UNIQUE
+from empower.lvapp import PT_UPDATE_WTP_CHANNEL
+from empower.lvapp import UPDATE_WTP_CHANNEL
 from empower.core.utils import generate_bssid
 from empower.core.virtualport import VirtualPortLvap
 
@@ -266,9 +258,11 @@ class LVAPPConnection(object):
         # with the list of shared VAP
         for tenant in RUNTIME.tenants.values():
 
+            # tenant does not use shared VAPs
             if tenant.bssid_type == T_TYPE_UNIQUE:
                 continue
 
+            # wtp not in this tenant
             if wtp.addr not in tenant.wtps:
                 continue
 
@@ -1000,7 +994,6 @@ class LVAPPConnection(object):
                              ht_mcs=ht_rates)
 
         LOG.info("Set tx policy %s", tx_policy)
-        print("Channel %d", tx_policy.block.channel)
 
         msg = SET_PORT.build(set_port)
         self.stream.write(msg)
@@ -1061,56 +1054,6 @@ class LVAPPConnection(object):
         msg = ADD_LVAP.build(add_lvap)
         self.stream.write(msg)
 
-    def _handle_incom_mcast_addr(self, wtp, request):
-        """Handle an incoming INCOM_MCAST_REQUEST message.
-        Args:
-            request, a INCOM_MCAST_REQUEST message
-        Returns:
-            None
-        """
-
-        LOG.info("New multicast address connection from %s WTP %s seq %u", self.addr[0], wtp.addr, request.seq)
-
-        if not wtp.connection:
-            LOG.info("Multicast incomming connection from disconnected WTP %s", wtp.addr)
-            return
-
-        mcast_addr = EtherAddress(request.mcast_addr)
-        iface = int(request.iface)
-
-        if not mcast_addr:
-            LOG.info("Unknown mcast addr from wtp %s", wtp)
-            return
-
-        LOG.info("Sending register incoming mcast address %s REQUEST from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
-        self.send_incom_mcast_addr_response(mcast_addr, wtp, iface)
-        self.send_register_incomming_mcast_address_message_to_self(request)
-
-    def send_register_incomming_mcast_address_message_to_self(self, request):
-        """Send a unsollicited INCOM_MCAST_REQUEST message to self."""
-
-        for handler in self.server.pt_types_handlers[PT_INCOM_MCAST_REQUEST]:
-            print("send_register_incomming_mcast_address_message_to_self")
-            handler(request)
-
-    def send_incom_mcast_addr_response(self, mcast_addr, wtp, iface):
-        """Send a INCOM_MCAST_RESPONSE message.
-        Args:
-            mcast_addr: an EtherAddress object
-        Returns:
-            None
-        """
-        response = Container(version=PT_VERSION,
-                             type=PT_INCOM_MCAST_RESPONSE,
-                             length=24,
-                             seq=wtp.seq,
-                             mcast_addr=mcast_addr.to_raw(),
-                             iface=iface)
-
-        msg = INCOM_MCAST_RESPONSE.build(response)
-        LOG.info("Sending incoming mcast address %s RESPONSE from wtp %s iface %d to self " %(mcast_addr, wtp.addr, iface))
-        self.stream.write(msg)
-
     def send_channel_switch_request(self, req_channel, hwaddr, old_channel, band):
         """Send a CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP message.
         Args:
@@ -1130,25 +1073,5 @@ class LVAPPConnection(object):
                              old_channel=old_channel,
                              band=band)
 
-
         msg = UPDATE_WTP_CHANNEL.build(response)
-        self.stream.write(msg)
-
-
-    def send_channel_switch_announcement_to_lvap(self, lvap, req_channel, req_mode, req_count):
-
-        csa_flags = Container(csa_active=True)
-
-        response = Container(version=PT_VERSION,
-                             type=PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
-                             length=20,
-                             seq=self.wtp.seq,
-                             sta=lvap.addr.to_raw(),
-                             csa_flags=csa_flags,
-                             csa_channel=req_channel,
-                             csa_switch_mode=req_mode,
-                             csa_switch_count=req_count)
-
-
-        msg = CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP.build(response)
         self.stream.write(msg)

@@ -58,8 +58,10 @@ PT_DEL_LVAP_RESPONSE = 0x51
 PT_INCOM_MCAST_REQUEST = 0x38
 PT_INCOM_MCAST_RESPONSE = 0x39
 
-PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP = 0x50
-PT_UPDATE_WTP_CHANNEL = 0x51
+PT_ADD_LVAP_RESPONSE = 0x50
+PT_DEL_LVAP_RESPONSE = 0x51
+
+PT_UPDATE_WTP_CHANNEL = 0x52
 
 HEADER = Struct("header", UBInt8("version"),
                 UBInt8("type"),
@@ -263,32 +265,14 @@ STATUS_VAP = Struct("status_vap", UBInt8("version"),
                     Bytes("net_bssid", 6),
                     Bytes("ssid", lambda ctx: ctx.length - 30))
 
-<<<<<<< HEAD
-INCOM_MCAST_REQUEST = Struct("incom_mcast_addr", UBInt8("version"),
-                    UBInt8("type"),
-                    UBInt32("length"),
-                    UBInt32("seq"),
-                    Bytes("wtp", 6),
-                    Bytes("mcast_addr", 6),
-                    UBInt8("iface"))
-
-INCOM_MCAST_RESPONSE = Struct("incom_mcast_addr_response", UBInt8("version"),
-                    UBInt8("type"),
-                    UBInt32("length"),
-                    UBInt32("seq"),
-                    Bytes("mcast_addr", 6),
-                    UBInt8("iface"))
-
-CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP = Struct("channel_switch_announcement", UBInt8("version"),
-                       UBInt8("type"),
-                       UBInt32("length"),
-                       UBInt32("seq"),
-                       Bytes("sta", 6),
-                       BitStruct("csa_flags", Padding(7),
-                            Bit("csa_active")),
-                       UBInt8("csa_channel"),
-                       UBInt8("csa_switch_mode"),
-                       UBInt8("csa_switch_count"))
+ADD_DEL_LVAP_RESPONSE = Struct("add_del_lvap", UBInt8("version"),
+                               UBInt8("type"),
+                               UBInt32("length"),
+                               UBInt32("seq"),
+                               Bytes("wtp", 6),
+                               Bytes("sta", 6),
+                               UBInt32("module_id"),
+UBInt32("status"))
 
 UPDATE_WTP_CHANNEL =  Struct("channel_switch_request", UBInt8("version"),
                        UBInt8("type"),
@@ -298,16 +282,6 @@ UPDATE_WTP_CHANNEL =  Struct("channel_switch_request", UBInt8("version"),
                        Bytes("hwaddr", 6),
                        UBInt8("old_channel"),
                        UBInt8("band"))
-=======
-ADD_DEL_LVAP_RESPONSE = Struct("add_del_lvap", UBInt8("version"),
-                               UBInt8("type"),
-                               UBInt32("length"),
-                               UBInt32("seq"),
-                               Bytes("wtp", 6),
-                               Bytes("sta", 6),
-                               UBInt32("module_id"),
-                               UBInt32("status"))
->>>>>>> upstream/master
 
 PT_TYPES = {PT_BYE: None,
             PT_REGISTER: None,
@@ -327,12 +301,9 @@ PT_TYPES = {PT_BYE: None,
             PT_SET_PORT: SET_PORT,
             PT_STATUS_PORT: STATUS_PORT,
             PT_STATUS_VAP: STATUS_VAP,
-            PT_INCOM_MCAST_REQUEST: INCOM_MCAST_REQUEST,
-            PT_INCOM_MCAST_RESPONSE: PT_INCOM_MCAST_RESPONSE,
-            PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP,
-            PT_UPDATE_WTP_CHANNEL: UPDATE_WTP_CHANNEL,
             PT_ADD_LVAP_RESPONSE: ADD_DEL_LVAP_RESPONSE,
-            PT_DEL_LVAP_RESPONSE: ADD_DEL_LVAP_RESPONSE}
+            PT_DEL_LVAP_RESPONSE: ADD_DEL_LVAP_RESPONSE,
+            PT_UPDATE_WTP_CHANNEL: UPDATE_WTP_CHANNEL}
 
 PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_REGISTER: [],
@@ -352,9 +323,6 @@ PT_TYPES_HANDLERS = {PT_BYE: [],
                      PT_SET_PORT: [],
                      PT_STATUS_PORT: [],
                      PT_STATUS_VAP: [],
-                     PT_INCOM_MCAST_REQUEST: [],
-                     PT_INCOM_MCAST_RESPONSE: [], 
-                     PT_CHANNEL_SWITCH_ANNOUNCEMENT_TO_LVAP: [],
-                     PT_UPDATE_WTP_CHANNEL: [],
                      PT_ADD_LVAP_RESPONSE: [],
-                     PT_DEL_LVAP_RESPONSE: []}
+                     PT_DEL_LVAP_RESPONSE: [],
+                     PT_UPDATE_WTP_CHANNEL: []}

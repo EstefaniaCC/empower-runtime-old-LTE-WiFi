@@ -58,7 +58,6 @@ if __name__ == "__main__":
              'events.lvnfleave',
              'lvnf_ems.lvnf_get',
              'lvnf_ems.lvnf_set',
-             'lvnf_stats.lvnf_stats',
-             'incom_mcast_addr.incom_mcast_addr']
+             'lvnf_stats.lvnf_stats']
 
     main(ARGVS)
