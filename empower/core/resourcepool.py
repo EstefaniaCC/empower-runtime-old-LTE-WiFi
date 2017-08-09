@@ -291,12 +291,10 @@ class ResourcePool(set):
 
 class ResourceBlock(object):
     """ EmPOWER resource block.
-
     A resource block is identified by a channel, a timeslot, and the
     spatial stream id. Channel is a tuple in the form (channel number, channel
     type).  Channel type is one of the channel supported by 802.11: 20, 20HT,
     40HT, 40VHT, 80VHT.
-
     Attributes:
         radio: The WTP or the LVAP at which this resource block is available
         hwaddr: the mac address of the wireless interface
@@ -482,4 +480,4 @@ class ResourceBlock(object):
 
     def __repr__(self):
         return "(%s, %s, %u, %s)" % (self.radio.addr, self.hwaddr,
-                                     self.channel, BANDS[self.band])
+            self.channel, BANDS[self.band])
