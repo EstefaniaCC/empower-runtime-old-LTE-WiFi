@@ -105,6 +105,7 @@ class BinCounter(Module):
         self.rx_bytes_per_second = []
 
         self.last = None
+        self.last_block = None
 
     def __eq__(self, other):
 
@@ -195,6 +196,9 @@ class BinCounter(Module):
                     worker.remove_module(module_id)
                     return
 
+        if self.last_block != lvap.blocks[0]:
+            self.last_block = lvap.blocks[0]
+            self.reset_stats()
 
         if not lvap.wtp.connection or lvap.wtp.connection.stream.closed():
             self.log.info("WTP %s not connected", lvap.wtp.addr)
@@ -279,6 +283,15 @@ class BinCounter(Module):
             stats.append(diff / delta)
 
         return stats
+
+    def reset_stats(self):
+        self.tx_bytes[:] = []
+        self.rx_bytes[:] = []
+
+        self.tx_packets[:] = []
+        self.rx_packets[:] = []
+
+        self.last = None
 
     def handle_response(self, response):
         """Handle an incoming STATS_RESPONSE message.
