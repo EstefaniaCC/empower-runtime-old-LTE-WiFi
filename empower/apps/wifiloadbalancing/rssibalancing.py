@@ -51,11 +51,9 @@ class RssiLoadBalancing(EmpowerApp):
 
         # Register an wtp up event
         self.wtpup(callback=self.wtp_up_callback)
-        self.wtpdown(callback=self.wtp_down_callback)
 
         # Register an lvap join event
         self.lvapjoin(callback=self.lvap_join_callback)
-        self.lvapleave(callback=self.lvap_leave_callback)
 
         # self.channels_bg = [1, 6, 11]
         # self.channels_an = [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 123, 136, 140]
@@ -65,14 +63,16 @@ class RssiLoadBalancing(EmpowerApp):
         self.channels_an = [149, 153, 157]
         self.channels = self.channels_bg + self.channels_an
 
+        self.test = "test1"
+
     def wtp_up_callback(self, wtp):
         """Called when a new WTP connects to the controller."""
 
-        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
-        new_channel = random.choice(self.channels)
+        # lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
+        # new_channel = random.choice(self.channels)
 
         for block in wtp.supports:
-            block.channel = new_channel
+        #     block.channel = new_channel
 
             self.ucqm(block=block,
                         tenant_id=self.tenant.tenant_id,
@@ -83,7 +83,7 @@ class RssiLoadBalancing(EmpowerApp):
         """Called when an joins the network."""
 
         self.bin_counter(lvap=lvap.addr,
-                 every=500,
+                 every=1000,
                  callback=self.counters_callback)
 
     def counters_callback(self, stats):
@@ -92,7 +92,7 @@ class RssiLoadBalancing(EmpowerApp):
         self.log.info("New counters received from %s" % stats.lvap)
 
         lvap = RUNTIME.lvaps[stats.lvap]
-        block = lvap.default_block
+        block = lvap.blocks[0]
 
         if not stats.tx_bytes_per_second and not stats.rx_bytes_per_second:
             print("-----It's null")
@@ -107,7 +107,7 @@ class RssiLoadBalancing(EmpowerApp):
 
         self.counters_to_file(lvap, block, stats)
 
-    def counters_to_file(self, lvap, block, summary):
+    def counters_to_file(self, lvap, block, stats):
         """ New stats available. """
 
         # per block log
@@ -116,23 +116,22 @@ class RssiLoadBalancing(EmpowerApp):
                                             BANDS[block.band])
 
 
-        line = "%f,%s,%s,%u,%d, %d,%d\n" % \
-            (summary.last, lvap.addr.to_str(), block.addr.to_str(), block.channel, self.aps_occupancy[block.addr.to_str()], \
-             summary.rx_bytes_per_second[0], summary.tx_bytes_per_second[0])
+        line = "%f,%s,%s,%u,%f, %f\n" % \
+            (stats.last, lvap.addr.to_str(), block.addr.to_str(), block.channel, \
+             stats.rx_bytes_per_second[0], stats.tx_bytes_per_second[0])
 
         with open(filename, 'a') as file_d:
             file_d.write(line)
 
         # per link log
 
-        link = "%s_%s_%u_%d_%s" % (lvap.addr.to_str(), block.addr.to_str(),
-                                block.channel, self.aps_occupancy[block.addr.to_str()],
-                                BANDS[block.band])
+        link = "%s_%s_%u_%s" % (lvap.addr.to_str(), block.addr.to_str(),
+                                block.channel, BANDS[block.band])
 
         filename = "rssiloadbalancing_%s_link_%s.csv" % (self.test, link)
 
         line = "%f,%d,%d\n" % \
-            (summary.last, summary.rx_bytes_per_second[0], summary.tx_bytes_per_second[0])
+            (stats.last, stats.rx_bytes_per_second[0], stats.tx_bytes_per_second[0])
 
         with open(filename, 'a') as file_d:
             file_d.write(line)
@@ -144,21 +143,14 @@ class RssiLoadBalancing(EmpowerApp):
         self.log.info("Running handover...")
 
         pool = self.blocks()
-        matches = pool & lvap.supported
 
-        if not matches:
+        if not pool:
             return
 
-        valid = [block for block in matches
-                 if block.ucqm[lvap.addr]['mov_rssi'] > lvap.default_block.ucqm[lvap.addr]['mov_rssi']]
-
-        if not valid:
-            return
-
-        new_block = max(valid, key=lambda x: x.ucqm[lvap.addr]['mov_rssi'])
+        new_block = max(pool, key=lambda x: x.ucqm[lvap.addr]['mov_rssi'])
         self.log.info("LVAP %s setting new block %s" % (lvap.addr, new_block))
 
-        lvap.scheduled_on = new_block
+        lvap.blocks = new_block
 
 
     def low_rssi(self, trigger):

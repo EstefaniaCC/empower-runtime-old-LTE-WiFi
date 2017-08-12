@@ -18,6 +18,7 @@
 import random
 import sys
 import time
+import os
 
 from empower.core.app import EmpowerApp
 from empower.core.app import DEFAULT_PERIOD
@@ -64,8 +65,6 @@ class WifiLoadBalancing(EmpowerApp):
 
         self.coloring_channels  = {"00:0D:B9:3E:05:44": 149, "00:0D:B9:3E:06:9C": 153, "00:0D:B9:3E:D9:DC": 157}
 
-        self.handover_lock = {}
-
         self.old_aps_occupancy = {}
         self.handover_occupancies = {}
         self.unsuccessful_handovers = {}
@@ -75,6 +74,11 @@ class WifiLoadBalancing(EmpowerApp):
 
         # Register an lvap join event
         self.lvapjoin(callback=self.lvap_join_callback)
+
+        self.log_file = "/home/estefania/handoverlog.txt"
+        self.bin_counters_file = "/home/estefania/bincounterlog.txt"
+        self.handovers_counter = 0
+        self.handovers_reverted = 0
 
     def to_dict(self):
         """Return json-serializable representation of the object."""
@@ -86,8 +90,8 @@ class WifiLoadBalancing(EmpowerApp):
         out['stations_aps_matrix'] = self.stations_aps_matrix
         out['bitrate_data_active'] = self.bitrate_data_active
         out['aps_occupancy'] = self.aps_occupancy
-        out['old_aps_occupancy'] = self.old_aps_occupancy
-        out['handover_lock'] = self.handover_lock
+        out['handovers_counter'] = self.handovers_counter
+        out['handovers_reverted'] = self.handovers_reverted
         return out
 
 
@@ -118,19 +122,19 @@ class WifiLoadBalancing(EmpowerApp):
         """Called when an joins the network."""
 
         self.bin_counter(lvap=lvap.addr,
-                 every=500,
+                 every=1000,
                  callback=self.counters_callback)
 
         self.lvap_stats(lvap=lvap.addr, 
-                    every=500, 
+                    every=1000, 
                     callback=self.lvap_stats_callback)
 
-        if lvap.addr.to_str() not in self.aps_clients_rel[lvap.default_block.addr.to_str()]:
-            self.aps_clients_rel[lvap.default_block.addr.to_str()].append(lvap.addr.to_str())
+        if lvap.addr.to_str() not in self.aps_clients_rel[lvap.blocks[0].addr.to_str()]:
+            self.aps_clients_rel[lvap.blocks[0].addr.to_str()].append(lvap.addr.to_str())
 
         self.stations_aps_matrix[lvap.addr.to_str()] = []
-        if lvap.default_block.addr.to_str() not in self.stations_aps_matrix[lvap.addr.to_str()]:
-            self.stations_aps_matrix[lvap.addr.to_str()].append(lvap.default_block.addr.to_str())
+        if lvap.blocks[0].addr.to_str() not in self.stations_aps_matrix[lvap.addr.to_str()]:
+            self.stations_aps_matrix[lvap.addr.to_str()].append(lvap.blocks[0].addr.to_str())
 
     def lvap_leave_callback(self, lvap):
         """Called when an LVAP disassociates from a tennant."""
@@ -138,11 +142,11 @@ class WifiLoadBalancing(EmpowerApp):
         self.delete_bincounter_worker(lvap)
         self.delete_lvap_stats_worker(lvap)
 
-        if lvap.addr.to_str() in self.aps_clients_rel[lvap.default_block.addr.to_str()]:
-            self.aps_clients_rel[lvap.default_block.addr.to_str()].remove(lvap.addr.to_str())
-        if lvap.addr.to_str() in self.bitrate_data_active[lvap.default_block.addr.to_str()]:
-            del self.bitrate_data_active[lvap.default_block.addr.to_str()][lvap.addr.to_str()]
-            self.nb_app_active[lvap.default_block.addr.to_str()] = len(self.bitrate_data_active[lvap.default_block.addr.to_str()])
+        if lvap.addr.to_str() in self.aps_clients_rel[lvap.blocks[0].addr.to_str()]:
+            self.aps_clients_rel[lvap.blocks[0].addr.to_str()].remove(lvap.addr.to_str())
+        if lvap.addr.to_str() in self.bitrate_data_active[lvap.blocks[0].addr.to_str()]:
+            del self.bitrate_data_active[lvap.blocks[0].addr.to_str()][lvap.addr.to_str()]
+            self.nb_app_active[lvap.blocks[0].addr.to_str()] = len(self.bitrate_data_active[lvap.blocks[0].addr.to_str()])
 
 
     def lvap_stats_callback(self, counter):
@@ -154,25 +158,25 @@ class WifiLoadBalancing(EmpowerApp):
 
         lvap = RUNTIME.lvaps[counter.lvap]
         highest_rate = int(float(max(rates, key=lambda v: int(float(rates[v]['prob'])))))
-        key = lvap.default_block.addr.to_str() + lvap.addr.to_str()
+        key = lvap.blocks[0].addr.to_str() + lvap.addr.to_str()
 
-        if lvap.default_block.addr.to_str() not in self.old_aps_occupancy:
-            self.old_aps_occupancy[lvap.default_block.addr.to_str()] = self.update_occupancy_ratio(lvap.default_block)
+        if lvap.blocks[0].addr.to_str() not in self.old_aps_occupancy:
+            self.old_aps_occupancy[lvap.blocks[0].addr.to_str()] = self.update_occupancy_ratio(lvap.blocks[0])
 
         if key in self.wifi_data:
             if self.wifi_data[key]['rate'] == 0:
                 self.wifi_data[key]['rate'] = highest_rate
             elif highest_rate != self.wifi_data[key]['rate']:
                 self.wifi_data[key]['rate_attempts'] += 1
-                if self.wifi_data[key]['rate_attempts'] < 5:
+                if self.wifi_data[key]['rate_attempts'] < 3:
                     return
         else:
             self.wifi_data[key] = \
             {
                 'rssi': None,
-                'wtp': lvap.default_block.addr.to_str(),
+                'wtp': lvap.blocks[0].addr.to_str(),
                 'sta': lvap.addr.to_str(),
-                'channel': lvap.default_block.channel,
+                'channel': lvap.blocks[0].channel,
                 'active': 1,
                 'tx_bytes_per_second': 0,
                 'rx_bytes_per_second': 0,
@@ -185,22 +189,23 @@ class WifiLoadBalancing(EmpowerApp):
         self.wifi_data[key]['rate'] = highest_rate
         self.wifi_data[key]['rate_attempts'] = 0
         
-        new_occupancy = self.update_occupancy_ratio(lvap.default_block)
+        new_occupancy = self.update_occupancy_ratio(lvap.blocks[0])
         average_occupancy = self.average_occupancy_surrounding_aps(lvap)
 
         # print("counters")
-        # print("------self.bitrate_data_active[block]", self.bitrate_data_active[lvap.default_block.addr.to_str()])
+        # print("------self.bitrate_data_active[block]", self.bitrate_data_active[lvap.blocks[0].addr.to_str()])
         # print("------Revert attempts: ", self.wifi_data[key]['revert_attempts'])
         # print("------Reesched attempts: ", self.wifi_data[key]['reesched_attempts'])
         # print("------New occupancy: ", new_occupancy)
-        # print("------self.old_aps_occupancy[block.addr.to_str()]: ", self.old_aps_occupancy[lvap.default_block.addr.to_str()])
+        # print("------self.old_aps_occupancy[block.addr.to_str()]: ", self.old_aps_occupancy[lvap.blocks[0].addr.to_str()])
         # print("------average_occupancy: ", average_occupancy)
 
         #if new_occupancy != average_occupancy:
-        if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
-        new_occupancy < (self.old_aps_occupancy[lvap.default_block.addr.to_str()] * 0.975) or \
-        new_occupancy > (self.old_aps_occupancy[lvap.default_block.addr.to_str()] * 1.025):
-            self.old_aps_occupancy[lvap.default_block.addr.to_str()] = new_occupancy
+        # if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
+        # new_occupancy < (self.old_aps_occupancy[lvap.blocks[0].addr.to_str()] * 0.975) or \
+        # new_occupancy > (self.old_aps_occupancy[lvap.blocks[0].addr.to_str()] * 1.025):
+        if self.evalute_significant_occupancy_dif(self.old_aps_occupancy[lvap.blocks[0].addr.to_str()], new_occupancy, average_occupancy) is True:
+            self.old_aps_occupancy[lvap.blocks[0].addr.to_str()] = new_occupancy
             if lvap not in self.handover_occupancies:
                 self.evaluate_lvap_scheduling(lvap)
 
@@ -208,10 +213,20 @@ class WifiLoadBalancing(EmpowerApp):
         """ New stats available. """
 
         self.log.info("New counters received from %s" % stats.lvap)
+        print("stats.rx_bytes_per_second", stats.rx_bytes_per_second)
+        print("stats.tx_bytes_per_second", stats.tx_bytes_per_second)
+        print(stats.tx_bytes)
+        print(stats.rx_bytes)
 
         lvap = RUNTIME.lvaps[stats.lvap]
-        block = lvap.default_block
+        block = lvap.blocks[0]
 
+        if os.path.isfile(self.bin_counters_file):
+            fh = open(self.bin_counters_file,"a")
+        else:
+            fh = open(self.bin_counters_file,"w")
+        print("sta %s stats.rx_bytes %s" %(stats.lvap, stats.rx_bytes), file=fh)
+        fh.close()
 
         # print("---------+++++++++++++++++++----------------++++++++++")
         # print("---------+++++++++++++++++++----------------++++++++++")
@@ -246,7 +261,7 @@ class WifiLoadBalancing(EmpowerApp):
                 'rssi': None,
                 'wtp': block.addr.to_str(),
                 'sta': stats.lvap.to_str(),
-                'channel': lvap.default_block.channel,
+                'channel': lvap.blocks[0].channel,
                 'active': 1,
                 'tx_bytes_per_second': stats.tx_bytes_per_second[0],
                 'rx_bytes_per_second': stats.rx_bytes_per_second[0],
@@ -285,9 +300,11 @@ class WifiLoadBalancing(EmpowerApp):
         print("self.old_aps_occupancy[block.addr.to_str()] ", self.old_aps_occupancy[block.addr.to_str()])
 
         #if new_occupancy != average_occupancy:
-        if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
-        new_occupancy < (self.old_aps_occupancy[block.addr.to_str()] * 0.975) or \
-        new_occupancy > (self.old_aps_occupancy[block.addr.to_str()] * 1.025):
+        # if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
+        # new_occupancy < (self.old_aps_occupancy[block.addr.to_str()] * 0.975) or \
+        # new_occupancy > (self.old_aps_occupancy[block.addr.to_str()] * 1.025):
+        old_occupancy = self.old_aps_occupancy[block.addr.to_str()]
+        if self.evalute_significant_occupancy_dif(old_occupancy, new_occupancy, average_occupancy) is True:
             if len(self.stations_aps_matrix[lvap.addr.to_str()]) > 1:
                 self.wifi_data[key]['reesched_attempts'] += 1
 
@@ -301,21 +318,21 @@ class WifiLoadBalancing(EmpowerApp):
         # print("------average_occupancy: ", average_occupancy)
 
 
-        if self.wifi_data[key]['revert_attempts'] >= 5:
+        if self.wifi_data[key]['revert_attempts'] >= 3:
             if lvap.addr.to_str() in self.bitrate_data_active[block.addr.to_str()]:
                 del self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]
                 self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
             self.wifi_data[key]['revert_attempts'] = 0
-            #if lvap not in self.handover_occupancies:
-            self.evaluate_lvap_revert(lvap)
-        elif self.wifi_data[key]['reesched_attempts'] >= 5:
+            if lvap not in self.handover_occupancies:
+                self.evaluate_lvap_revert(lvap)
+        elif self.wifi_data[key]['reesched_attempts'] >= 3:
             self.wifi_data[key]['reesched_attempts'] = 0
             self.old_aps_occupancy[block.addr.to_str()] = new_occupancy
             #if self.nb_app_active[block.addr.to_str()] > 1:
-            #if lvap not in self.handover_occupancies:
-            self.evaluate_lvap_scheduling(lvap)
+            if lvap not in self.handover_occupancies:
+                self.evaluate_lvap_scheduling(lvap)
 
-    def counters_to_file(self, lvap, block, summary):
+    def counters_to_file(self, lvap, block, stats):
         """ New stats available. """
 
         # per block log
@@ -324,23 +341,23 @@ class WifiLoadBalancing(EmpowerApp):
                                             BANDS[block.band])
 
 
-        line = "%f,%s,%s,%u,%d, %d,%d\n" % \
-            (summary.last, lvap.addr.to_str(), block.addr.to_str(), block.channel, self.aps_occupancy[block.addr.to_str()], \
-             summary.rx_bytes_per_second[0], summary.tx_bytes_per_second[0])
+        line = "%f,%s,%s,%u,%f, %f,%f\n" % \
+            (stats.last, lvap.addr.to_str(), block.addr.to_str(), block.channel, self.aps_occupancy[block.addr.to_str()], \
+             stats.rx_bytes_per_second[0], stats.tx_bytes_per_second[0])
 
         with open(filename, 'a') as file_d:
             file_d.write(line)
 
         # per link log
 
-        link = "%s_%s_%u_%d_%s" % (lvap.addr.to_str(), block.addr.to_str(),
+        link = "%s_%s_%u_%f_%s" % (lvap.addr.to_str(), block.addr.to_str(),
                                 block.channel, self.aps_occupancy[block.addr.to_str()],
                                 BANDS[block.band])
 
         filename = "wifiloadbalancing_%s_link_%s.csv" % (self.test, link)
 
         line = "%f,%d,%d\n" % \
-            (summary.last, summary.rx_bytes_per_second[0], summary.tx_bytes_per_second[0])
+            (stats.last, stats.rx_bytes_per_second[0], stats.tx_bytes_per_second[0])
 
         with open(filename, 'a') as file_d:
             file_d.write(line)
@@ -386,7 +403,7 @@ class WifiLoadBalancing(EmpowerApp):
 
     def evaluate_lvap_revert(self, lvap):
 
-        block = lvap.default_block
+        block = lvap.blocks[0]
 
         if block.addr.to_str() + lvap.addr.to_str() not in self.wifi_data or \
            self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi'] is None:
@@ -412,57 +429,39 @@ class WifiLoadBalancing(EmpowerApp):
         if not new_block:
             return
 
-        print("++++++++ Transfering inactive LVAP from %s to %s++++++++" %(block.addr.to_str(), new_block.addr.to_str()))
-        print("current_rssi %d. Target rssi %d" % (current_rssi, best_rssi))
-
-        if lvap.default_block == new_block:
+        if lvap.blocks[0] == new_block:
             return 
 
-        print("********************")
-        print("best_lvap", lvap.addr.to_str())
-        print("best_lvap in self.handover_lock", lvap.addr.to_str() in self.handover_lock)
-        if lvap.addr.to_str() in self.handover_lock:
-            print("time.time() - self.handover_lock[best_lvap]['time']", time.time() - self.handover_lock[lvap.addr.to_str()]['time'])
-            print("self.handover_lock[best_lvap]['lock']", self.handover_lock[lvap.addr.to_str()]['lock'])
-        print(self.handover_lock)
-        print(time.time())
-        print("********************")
+        try:
+            lvap.blocks = new_block
+            self.handovers_counter += 1
 
-        if lvap.addr.to_str() in self.handover_lock and \
-            ((time.time() - self.handover_lock[lvap.addr.to_str()]['time'] < 3) or \
-            self.handover_lock[lvap.addr.to_str()]['lock'] is True):
+            print("++++++++ Transfering inactive LVAP from %s to %s++++++++" %(block.addr.to_str(), new_block.addr.to_str()))
+            print("current_rssi %d. Target rssi %d" % (current_rssi, best_rssi))
+
+            if os.path.isfile(self.log_file):
+                fh = open(self.log_file,"a")
+            else:
+                fh = open(self.log_file,"w")
+            print("++++++++ Transfering inactive LVAP from %s to %s++++++++" %(block.addr.to_str(), new_block.addr.to_str()), file=fh)
+            print("current_rssi %d. Target rssi %d" % (current_rssi, best_rssi), file=fh)
+            fh.close()
+
+            self.transfer_block_data(block, new_block, lvap)
+
+            self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
+            self.update_occupancy_ratio(block)
+
+            self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
+            self.update_occupancy_ratio(new_block)
+        except ValueError:
+            print("Handover already in progress for lvap %s" % lvap.addr.to_str())
             return
-
-        if lvap.addr.to_str() in self.handover_lock:
-            self.handover_lock[lvap.addr.to_str()]['lock'] = True
-            self.handover_lock[lvap.addr.to_str()]['time'] = time.time()
-        else:
-            self.handover_lock[lvap.addr.to_str()] = \
-            {
-                'lock': True,
-                'time': time.time()
-            }
-
-        print("HANDOVER LOCK")
-        print(self.handover_lock)
-        print(time.time())
-        
-        lvap.scheduled_on = new_block
-
-        self.transfer_block_data(block, new_block, lvap)
-
-        self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
-        self.update_occupancy_ratio(block)
-
-        self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
-        self.update_occupancy_ratio(new_block)
-
-        self.handover_lock[lvap.addr.to_str()]['lock'] = False
 
 
     def evaluate_lvap_scheduling(self, lvap):
 
-        block = lvap.default_block
+        block = lvap.blocks[0]
 
         # It is not necessary to perform a change if the traffic of the ap is lower than the average or if it is holding a single lvap
         if block.addr.to_str() not in self.aps_occupancy:
@@ -505,16 +504,16 @@ class WifiLoadBalancing(EmpowerApp):
 
                 # Checks if a similar handover has been performed in an appropiate way.
                 # If the conditions have changed for 5 times in a row, the wtp is taken again as a candidate
-                if sta in self.unsuccessful_handovers:
-                    # print("There are unsuccessful handovers", self.unsuccessful_handovers[sta])
-                    if wtp in self.unsuccessful_handovers[sta]:
-                        if block.addr.to_str() == self.unsuccessful_handovers[sta][wtp]['old_ap'] and \
-                        self.aps_occupancy[wtp] < (self.unsuccessful_handovers[sta][wtp]['previous_occupancy'] * 0.975):
-                        # self.aps_occupancy[wtp] != self.unsuccessful_handovers[sta][wtp]['previous_occupancy']:
-                            self.unsuccessful_handovers[sta][wtp]['handover_retries'] += 1
-                        if self.unsuccessful_handovers[sta][wtp]['handover_retries'] < 5:
-                            continue
-                        del self.unsuccessful_handovers[sta][wtp]
+                if sta in self.unsuccessful_handovers and wtp in self.unsuccessful_handovers[sta]:
+                    # if block.addr.to_str() == self.unsuccessful_handovers[sta][wtp]['old_ap'] and \
+                    # self.aps_occupancy[wtp] < (self.unsuccessful_handovers[sta][wtp]['previous_occupancy'] * 0.975):
+                    if self.evalute_significant_occupancy_dif(self.unsuccessful_handovers[sta][wtp]['previous_occupancy'], \
+                        self.aps_occupancy[wtp], self.unsuccessful_handovers[sta][wtp]['previous_occupancy']) is True:
+                    # self.aps_occupancy[wtp] != self.unsuccessful_handovers[sta][wtp]['previous_occupancy']:
+                        self.unsuccessful_handovers[sta][wtp]['handover_retries'] += 1
+                    if self.unsuccessful_handovers[sta][wtp]['handover_retries'] < 5:
+                        continue
+                    del self.unsuccessful_handovers[sta][wtp]
 
                 conflict_occupancy = self.aps_occupancy[wtp]
                 wtp_channel = self.aps_channels_matrix[wtp]
@@ -560,10 +559,10 @@ class WifiLoadBalancing(EmpowerApp):
                     best_lvap = sta
                 # In case of finding 2 candidates lvaps whose target WTPs occupancy is the same, we will take the one
                 # whose current wtp occupancy is higher. In that case it will be less crowded after the handover
-                # elif ap['metric'] == highest_metric and ap['conf_metric'] == highest_metric:
-                #     if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
-                #         best_wtp = ap['wtp']
-                #         best_lvap = sta
+                elif ap['metric'] == highest_metric and ap['conf_metric'] == highest_metric:
+                    if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
+                        best_wtp = ap['wtp']
+                        best_lvap = sta
 
         new_block = self.get_block_for_ap_addr(best_wtp)
         new_lvap = self.get_lvap_for_sta_addr(best_lvap)
@@ -572,62 +571,47 @@ class WifiLoadBalancing(EmpowerApp):
             # print("KDSFJLDSJFLKDSFJKLDSFJLKDSFDFJDSLKFJDKSL9999999999999999999999 NOT NEW BLOCK")
             return
 
-        if new_lvap.default_block == new_block:
+        if new_lvap.blocks[0] == new_block:
             return 
 
-        if best_lvap in self.handover_lock and \
-            ((time.time() - self.handover_lock[best_lvap]['time'] < 3) or \
-            self.handover_lock[best_lvap]['lock'] is True):
-            return
+        try:
+            src_block = new_lvap.blocks[0].addr.to_str()
+            new_lvap.blocks = new_block
 
-        print("********************")
-        print("best_lvap", best_lvap)
-        print("best_lvap in self.handover_lock", best_lvap in self.handover_lock)
-        if best_lvap in self.handover_lock:
-            print("time.time() - self.handover_lock[best_lvap]['time']", time.time() - self.handover_lock[best_lvap]['time'])
-            print("self.handover_lock[best_lvap]['lock']", self.handover_lock[best_lvap]['lock'])
-        print(self.handover_lock)
-        print(time.time())
-        print("********************")
+            self.handovers_counter += 1
+            current_metric = abs(self.wifi_data[src_block + new_lvap.addr.to_str()]['rssi']) * self.aps_occupancy[self.wifi_data[src_block]]
+            new_metric = abs(self.wifi_data[new_block.addr.to_str() + new_lvap.addr.to_str()]['rssi']) * self.aps_occupancy[self.wifi_data[new_block.addr.to_str()]]
+            print("/////////////// Performing handover for LVAP %s ///////////////" % new_lvap.addr.to_str())
+            print("Handover from %s (occup. %f - metric %f) to %s (occup. %f - metric %f)" %(src_block, self.aps_occupancy[src_block], \
+                current_metric, new_block.addr.to_str(), self.aps_occupancy[new_block.addr.to_str()], new_metric))
 
-        if best_lvap in self.handover_lock:
-            self.handover_lock[best_lvap]['lock'] = True
-            self.handover_lock[best_lvap]['time'] = time.time()
-        else:
-            self.handover_lock[best_lvap] = \
-            {
-                'lock': True,
-                'time': time.time()
-            }
+            if os.path.isfile(self.log_file):
+                fh = open(self.log_file,"a")
+            else:
+                fh = open(self.log_file,"w")
+            print("/////////////// Performing handover for LVAP %s ///////////////" % new_lvap.addr.to_str(), file=fh)
+            print("Handover from %s (occup. %f - metric %f) to %s (occup. %f - metric %f)" %(src_block, self.aps_occupancy[src_block], \
+                current_metric, new_block.addr.to_str(), self.aps_occupancy[new_block.addr.to_str()], new_metric), file=fh)
+            fh.close()
 
-        print("HANDOVER LOCK")
-        print(self.handover_lock)
-        print(time.time())
-
-        print("/////////////// Performing handover for LVAP %s ///////////////" % new_lvap.addr.to_str())
-        print("Handover from %s (occup. %f) to %s (occup. %f)" %(block.addr.to_str(), self.aps_occupancy[block.addr.to_str()], new_block.addr.to_str(), highest_metric))
-
-        self.handover_occupancies[new_lvap] = \
-            {
-                'old_ap': block.addr.to_str(),
-                'handover_ap': best_wtp,
-                'previous_occupancy': self.estimate_global_occupancy_ratio(),
-                'handover_time': time.time()
-            }
+            self.handover_occupancies[new_lvap] = \
+                {
+                    'old_ap': block.addr.to_str(),
+                    'handover_ap': best_wtp,
+                    'previous_occupancy': self.estimate_global_occupancy_ratio(),
+                    'handover_time': time.time()
+                }
         
-        new_lvap.scheduled_on = new_block
+            self.transfer_block_data(block, new_block, new_lvap)
 
-        self.transfer_block_data(block, new_block, new_lvap)
+            self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
+            self.update_occupancy_ratio(block)
 
-        self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
-        self.update_occupancy_ratio(block)
-
-        self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
-        self.update_occupancy_ratio(new_block)
-
-        self.handover_lock[best_lvap]['lock'] = False
-
-
+            self.nb_app_active[new_block.addr.to_str()] = len(self.bitrate_data_active[new_block.addr.to_str()])
+            self.update_occupancy_ratio(new_block)
+        except ValueError:
+            print("Handover already in progress for lvap %s" % lvap.addr.to_str())
+            return
 
 
     def transfer_block_data(self, src_block, dst_block, lvap):
@@ -732,7 +716,7 @@ class WifiLoadBalancing(EmpowerApp):
 
         # return (average_occupancy / len(self.stations_aps_matrix[lvap.addr.to_str()]))
         average_occupancy = 0
-        block = lvap.default_block
+        block = lvap.blocks[0]
 
         if block.addr.to_str() not in self.conflict_aps:
             #return self.aps_occupancy[block.addr.to_str()]
@@ -778,46 +762,23 @@ class WifiLoadBalancing(EmpowerApp):
         for lvap, value in self.handover_occupancies.items():
 
             # Wait some time to get statistics before checking if the handover was valid
-            if time.time() - value['handover_time'] < 2:
+            if time.time() - value['handover_time'] < 5:
                 continue
             handover_occupancy_rate = self.estimate_global_occupancy_ratio()
 
             # If the previous occupancy rate was better, the handover must be reverted
-            if value['previous_occupancy'] < handover_occupancy_rate:
+            if value['previous_occupancy'] < handover_occupancy_rate and (handover_occupancy_rate - value['previous_occupancy']) > 1:
                 self.log.info("The handover from the AP %s to the AP %s for the client %s IS NOT efficient. The previous channel occupancy rate was %f(ms) and it is %f(ms) after the handover. It is going to be reverted" \
                     %(value['old_ap'], value['handover_ap'], lvap, value['previous_occupancy'], handover_occupancy_rate))
-
-                print("********************")
-                print("best_lvap", lvap.addr.to_str())
-                print("best_lvap in self.handover_lock", lvap.addr.to_str() in self.handover_lock)
-                if lvap.addr.to_str() in self.handover_lock:
-                    print("time.time() - self.handover_lock[best_lvap]['time']", time.time() - self.handover_lock[lvap.addr.to_str()]['time'])
-                    print("self.handover_lock[best_lvap]['lock']", self.handover_lock[lvap.addr.to_str()]['lock'])
-                print(self.handover_lock)
-                print(time.time())
-                print("********************")
-
-                if lvap.addr.to_str() in self.handover_lock and \
-                    ((time.time() - self.handover_lock[lvap.addr.to_str()]['time'] < 3) or \
-                    self.handover_lock[lvap.addr.to_str()]['lock'] is True):
-                    return
-
-                print("HANDOVER LOCK")
-                print(self.handover_lock)
-                print(time.time())
-
-                if lvap.addr.to_str() in self.handover_lock:
-                    self.handover_lock[lvap.addr.to_str()]['lock'] = True
-                    self.handover_lock[lvap.addr.to_str()]['time'] = time.time()
+                if os.path.isfile(self.log_file):
+                    fh = open(self.log_file,"a")
                 else:
-                    self.handover_lock[lvap.addr.to_str()] = \
-                    {
-                        'lock': True,
-                        'time': time.time()
-                    }
+                    fh = open(self.log_file,"w")
+                print("The handover from the AP %s to the AP %s for the client %s IS NOT efficient. The previous channel occupancy rate was %f(ms) and it is %f(ms) after the handover. It is going to be reverted" \
+                    %(value['old_ap'], value['handover_ap'], lvap, value['previous_occupancy'], handover_occupancy_rate), file=fh)
+                fh.close() 
 
-                # self.revert_handover(lvap, handover_occupancy_rate)
-                self.handover_lock[lvap.addr.to_str()]['lock']  = False
+                self.revert_handover(lvap, handover_occupancy_rate)
             else:
                 self.log.info("The handover from the AP %s to the AP %s for the client %s is efficient. The previous channel occupancy rate was %f(ms) and it is %f(ms) after the handover" \
                     %(value['old_ap'], value['handover_ap'], lvap, value['previous_occupancy'], handover_occupancy_rate)) 
@@ -833,40 +794,88 @@ class WifiLoadBalancing(EmpowerApp):
         handover_ap = self.get_block_for_ap_addr(self.handover_occupancies[lvap]['handover_ap'])
         old_ap = self.get_block_for_ap_addr(self.handover_occupancies[lvap]['old_ap'])
 
-        if lvap.addr.to_str() not in self.unsuccessful_handovers:
-            self.unsuccessful_handovers[lvap.addr.to_str()] = {}
-
-        if handover_ap.addr.to_str() not in self.unsuccessful_handovers[lvap.addr.to_str()]:
-            self.unsuccessful_handovers[lvap.addr.to_str()] = \
-                {
-                    handover_ap.addr.to_str(): {
-                        'rssi': self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi'],
-                        'previous_occupancy': handover_occupancy_rate,
-                        'handover_retries': 0,
-                        'old_ap': old_ap.addr.to_str(),
-                        'handover_ap': handover_ap.addr.to_str()
-                    }
-                }
-        else:
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['rssi'] = self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi']
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['previous_occupancy'] = handover_occupancy_rate
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_retries'] = 0
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['old_ap'] = old_ap.addr.to_str()
-            self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_ap'] = handover_ap.addr.to_str()
-
-        if lvap.default_block == old_ap:
+        if lvap.blocks[0] == old_ap:
             return
 
-        print("------------------------ Reverting handover from %s to %s" %(handover_ap.addr.to_str(), old_ap.addr.to_str()))
-        lvap.scheduled_on = old_ap
+        try:
+            lvap.blocks = old_ap
 
-        self.transfer_block_data(handover_ap, old_ap, lvap)
+            self.handovers_reverted += 1
 
-        self.nb_app_active[handover_ap.addr.to_str()] = len(self.bitrate_data_active[handover_ap.addr.to_str()])
-        self.update_occupancy_ratio(handover_ap)
+            print("------------------------ Reverting handover from %s to %s" %(handover_ap.addr.to_str(), old_ap.addr.to_str()))
 
-        self.nb_app_active[old_ap.addr.to_str()] = len(self.bitrate_data_active[old_ap.addr.to_str()])
-        self.update_occupancy_ratio(old_ap)
+            if os.path.isfile(self.log_file):
+                fh = open(self.log_file,"a")
+            else:
+                fh = open(self.log_file,"w")
+            print("------------------------ Reverting handover from %s to %s" %(handover_ap.addr.to_str(), old_ap.addr.to_str()), file=fh)
+            fh.close() 
+
+            if lvap.addr.to_str() not in self.unsuccessful_handovers:
+                self.unsuccessful_handovers[lvap.addr.to_str()] = {}
+
+            if handover_ap.addr.to_str() not in self.unsuccessful_handovers[lvap.addr.to_str()]:
+                self.unsuccessful_handovers[lvap.addr.to_str()] = \
+                    {
+                        handover_ap.addr.to_str(): {
+                            'rssi': self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi'],
+                            'previous_occupancy': handover_occupancy_rate,
+                            'handover_retries': 0,
+                            'old_ap': old_ap.addr.to_str(),
+                            'handover_ap': handover_ap.addr.to_str()
+                        }
+                    }
+            else:
+                self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['rssi'] = self.wifi_data[handover_ap.addr.to_str() + lvap.addr.to_str()]['rssi']
+                self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['previous_occupancy'] = handover_occupancy_rate
+                self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_retries'] = 0
+                self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['old_ap'] = old_ap.addr.to_str()
+                self.unsuccessful_handovers[lvap.addr.to_str()][handover_ap.addr.to_str()]['handover_ap'] = handover_ap.addr.to_str()
+
+            self.transfer_block_data(handover_ap, old_ap, lvap)
+
+            self.nb_app_active[handover_ap.addr.to_str()] = len(self.bitrate_data_active[handover_ap.addr.to_str()])
+            self.update_occupancy_ratio(handover_ap)
+
+            self.nb_app_active[old_ap.addr.to_str()] = len(self.bitrate_data_active[old_ap.addr.to_str()])
+            self.update_occupancy_ratio(old_ap)
+        except ValueError:
+            print("Handover already in progress for lvap %s" % lvap.addr.to_str())
+            return
+
+    def evalute_significant_occupancy_dif(self, old_occupancy, new_occupancy, average_occupancy):
+        # if abs(old_occupancy - new_occupancy) <= 1 and abs(average_occupancy - new_occupancy) <= 1:
+        #     return False
+
+        if new_occupancy <= 1:
+            return False
+        
+        elif new_occupancy > 1 or new_occupancy <= 5:
+            if new_occupancy < (average_occupancy * 0.5) or new_occupancy > (average_occupancy * 1.5) or \
+                new_occupancy < (old_occupancy * 0.5) or new_occupancy > (old_occupancy * 1.5):
+                return True
+            return False
+        elif new_occupancy > 5 or new_occupancy <= 10:
+            if new_occupancy < (average_occupancy * 0.75) or new_occupancy > (average_occupancy * 1.25) or \
+                new_occupancy < (old_occupancy * 0.75) or new_occupancy > (old_occupancy * 1.25):
+                return True
+            return False
+        elif new_occupancy > 10 or new_occupancy <= 50:
+            if new_occupancy < (average_occupancy * 0.9) or new_occupancy > (average_occupancy * 1.1) or \
+                new_occupancy < (old_occupancy * 0.9) or new_occupancy > (old_occupancy * 1.1):
+                return True
+            return False
+        elif new_occupancy > 50  or new_occupancy <= 75:
+            if new_occupancy < (average_occupancy * 0.95) or new_occupancy > (average_occupancy * 1.05) or \
+                new_occupancy < (old_occupancy * 0.95) or new_occupancy > (old_occupancy * 1.05):
+                return True
+            return False
+        elif new_occupancy > 75:
+            if new_occupancy < (average_occupancy * 0.975) or new_occupancy > (average_occupancy * 1.025) or \
+                new_occupancy < (old_occupancy * 0.975) or new_occupancy > (old_occupancy * 1.025):
+                return True
+            return False
+        
 
     def loop(self):
         """ Periodic job. """
