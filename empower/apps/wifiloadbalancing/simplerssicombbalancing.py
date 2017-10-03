@@ -39,7 +39,6 @@ from empower.apps.survey import survey
 
 
 RSSI_LIMIT = 8
-
 DEFAULT_ADDRESS = "ff:ff:ff:ff:ff:ff"
 
 class WifiLoadBalancing(EmpowerApp):
@@ -83,6 +82,7 @@ class WifiLoadBalancing(EmpowerApp):
         self.handovers_counter = 0
         self.handovers_reverted = 0
         self.last_handover_time = None
+        self.max_load = 75
 
     def to_dict(self):
         """Return json-serializable representation of the object."""
@@ -159,6 +159,21 @@ class WifiLoadBalancing(EmpowerApp):
             del self.bitrate_data_active[lvap.blocks[0].addr.to_str()][lvap.addr.to_str()]
             self.nb_app_active[lvap.blocks[0].addr.to_str()] = len(self.bitrate_data_active[lvap.blocks[0].addr.to_str()])
 
+    def low_rssi(self, trigger):
+        """ Perform handover if an LVAP's rssi is
+        going below the threshold. """
+
+        self.log.info("Received trigger from %s rssi %u dB",
+                      trigger.event['block'],
+                      trigger.event['current'])
+
+        lvap = self.lvap(trigger.lvap)
+
+        if not lvap:
+            return
+
+        self.evaluate_lvap_revert(lvap)
+
     def summary_callback(self, summary):
         """ New stats available. """
 
@@ -166,7 +181,7 @@ class WifiLoadBalancing(EmpowerApp):
                       summary.addr, len(summary.frames))
 
         # per block log
-        filename = "survey_wifiloadbalancing_%s_%s_%u_%s.csv" % (self.test, summary.block.addr,
+        filename = "survey_simplerssicombbalancing_%s_%s_%u_%s.csv" % (self.test, summary.block.addr,
                                             summary.block.channel,
                                             BANDS[summary.block.band])
 
@@ -179,7 +194,6 @@ class WifiLoadBalancing(EmpowerApp):
 
             with open(filename, 'a') as file_d:
                 file_d.write(line)
-
 
     def lvap_stats_callback(self, counter):
         """ New stats available. """
@@ -376,7 +390,8 @@ class WifiLoadBalancing(EmpowerApp):
             or len(self.handover_occupancies) != 0:
             return
 
-        if self.wifi_data[key]['revert_attempts'] >= 3:
+        # if self.wifi_data[key]['revert_attempts'] >= 3:
+        if self.wifi_data[key]['revert_attempts'] >= 1:
             if lvap.addr.to_str() in self.bitrate_data_active[block.addr.to_str()]:
                 del self.bitrate_data_active[block.addr.to_str()][lvap.addr.to_str()]
                 self.nb_app_active[block.addr.to_str()] = len(self.bitrate_data_active[block.addr.to_str()])
@@ -394,7 +409,7 @@ class WifiLoadBalancing(EmpowerApp):
         """ New stats available. """
 
         # per block log
-        filename = "wifiloadbalancing_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
+        filename = "simplerssicombbalancing_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
                                             block.channel,
                                             BANDS[block.band])
 
@@ -505,14 +520,10 @@ class WifiLoadBalancing(EmpowerApp):
             print("wifi data src block %s" %(block.addr.to_str()), file=fh)
             for key, clients in self.aps_clients_rel.items():
                 for client in clients:
-                    if block.addr.to_str()+client not in self.wifi_data:
-                        continue
                     print(self.wifi_data[block.addr.to_str()+client], file=fh)
             print("wifi data dst block %s" %(new_block.addr.to_str()), file=fh)
             for key, clients in self.aps_clients_rel.items():
                 for client in clients:
-                    if new_block.addr.to_str()+client not in self.wifi_data:
-                        continue
                     print(self.wifi_data[new_block.addr.to_str()+client], file=fh)
             fh.close()
         except ValueError:
@@ -625,18 +636,35 @@ class WifiLoadBalancing(EmpowerApp):
         highest_metric = sys.maxsize
         best_wtp = None
         best_lvap = None
-        for sta, wtps in clients_candidates.items():
-            for ap in wtps:
-                if ap['metric'] < highest_metric and ap['conf_metric'] < highest_metric:
-                    highest_metric = ap['conf_metric']
-                    best_wtp = ap['wtp']
-                    best_lvap = sta
-                # In case of finding 2 candidates lvaps whose target WTPs occupancy is the same, we will take the one
-                # whose current wtp occupancy is higher. In that case it will be less crowded after the handover
-                elif ap['metric'] == highest_metric and ap['conf_metric'] == highest_metric:
-                    if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
+        best_rssi = -120
+        global_occupancy_before_ho = self.estimate_global_occupancy_ratio()
+
+        if global_occupancy_before_ho <= self.max_load:
+            for sta, wtps in clients_candidates.items():
+                for ap in wtps:
+                    if ap['metric'] < highest_metric and ap['conf_metric'] < highest_metric:
+                        highest_metric = ap['conf_metric']
                         best_wtp = ap['wtp']
                         best_lvap = sta
+                    # In case of finding 2 candidates lvaps whose target WTPs occupancy is the same, we will take the one
+                    # whose current wtp occupancy is higher. In that case it will be less crowded after the handover
+                    elif ap['metric'] == highest_metric and ap['conf_metric'] == highest_metric:
+                        if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
+                            best_wtp = ap['wtp']
+                            best_lvap = sta
+        else:
+            for sta, wtps in clients_candidates.items():
+                for ap in wtps:
+                    if ap['rssi'] > best_rssi and ap['rssi'] != 0:
+                        best_rssi = ap['rssi']
+                        best_wtp = ap['wtp']
+                        best_lvap = sta
+                    # In case of finding 2 candidates lvaps whose target WTPs occupancy is the same, we will take the one
+                    # whose current wtp occupancy is higher. In that case it will be less crowded after the handover
+                    elif ap['rssi'] == best_rssi:
+                        if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
+                            best_wtp = ap['wtp']
+                            best_lvap = sta
 
         new_block = self.get_block_for_ap_addr(best_wtp)
         new_lvap = self.get_lvap_for_sta_addr(best_lvap)
@@ -649,7 +677,6 @@ class WifiLoadBalancing(EmpowerApp):
             return 
 
         try:
-            global_occupancy_before_ho = self.estimate_global_occupancy_ratio()
             src_block = new_lvap.blocks[0].addr.to_str()
             new_lvap.blocks = new_block
 
@@ -796,7 +823,6 @@ class WifiLoadBalancing(EmpowerApp):
                 del self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]
 
         self.conflict_graph()
-
 
     def average_occupancy_surrounding_aps(self, lvap):
         # average_occupancy = 0
@@ -982,7 +1008,6 @@ class WifiLoadBalancing(EmpowerApp):
                 return True
             return False
 
-
     def evaluate_movement(self):
         lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
         for lvap in lvaps.values():
@@ -994,6 +1019,7 @@ class WifiLoadBalancing(EmpowerApp):
 
             if self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi'] < -85 and len(self.stations_aps_matrix[lvap.addr.to_str()]) >= 2:
                 self.evaluate_lvap_revert(lvap)
+        
 
     def loop(self):
         """ Periodic job. """
@@ -1006,6 +1032,7 @@ class WifiLoadBalancing(EmpowerApp):
         elif not self.initial_setup:
             if self.handover_occupancies:
                 self.evaluate_handover()
+
             self.evaluate_movement()
 
 def launch(tenant_id, period=1000):

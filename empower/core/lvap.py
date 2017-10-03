@@ -78,7 +78,7 @@ class LVAP(object):
       port.mcs = [1,2,3,4,5,6,7]
 
     Where block is the ResourceBlock previously assigned. A new port
-    configuration can be assigned in a single step with:
+    configuration can beF assigned in a single step with:
 
       lvap.downlink[block] = port
 
@@ -372,6 +372,13 @@ class LVAP(object):
 
         # send intents
         self.set_ports()
+
+    def reset_downlink_port(self):
+        """Reset downlink port."""
+
+        dl_block = self.blocks[0]
+        print(self._downlink[dl_block])
+        self._downlink[dl_block] = RadioPort(self, dl_block)
 
     def __assign_downlink(self, dl_block):
         """Set the downlink block.

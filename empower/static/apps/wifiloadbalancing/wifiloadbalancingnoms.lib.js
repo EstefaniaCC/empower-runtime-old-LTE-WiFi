@@ -45,7 +45,7 @@ function fetchSignalData(tenant_id) {
 
     setTimeout(function () {
 
-        $.getJSON("/api/v1/tenants/" + tenant_id + "/components/empower.apps.wifiloadbalancing.wifiloadbalancing", function(data) {
+        $.getJSON("/api/v1/tenants/" + tenant_id + "/components/empower.apps.wifiloadbalancing.wifiloadbalancingnoms", function(data) {
             /* Process the data here after receiving from app.*/
             if (data == null) {
                 return;

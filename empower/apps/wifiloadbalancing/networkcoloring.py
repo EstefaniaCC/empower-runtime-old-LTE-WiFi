@@ -48,7 +48,8 @@ class NetworkColoring(EmpowerApp):
 
         self.channels = self.channels_bg + self.channels_an
         self.common_initial_channel = random.choice(self.channels)
-        self.coloring_channels  = {149, 153, 157}
+        self.coloring_channels  = {149, 153, 157, 161, 165}
+        self.channel_assignment = {}
 
         # Register an wtp up event
         self.wtpup(callback=self.wtp_up_callback)
@@ -65,6 +66,7 @@ class NetworkColoring(EmpowerApp):
         out['aps_clients_rel'] = self.aps_clients_rel
         out['conflict_aps'] = self.conflict_aps
         out['stations_aps_matrix'] = self.stations_aps_matrix
+        out['channel_assignment'] = self.channel_assignment
 
         return out
 
@@ -90,9 +92,9 @@ class NetworkColoring(EmpowerApp):
     def lvap_join_callback(self, lvap):
         """Called when an joins the network."""
 
-        self.aps_clients_rel[lvap.default_block.addr.to_str()].append(lvap.addr.to_str())
+        self.aps_clients_rel[lvap.blocks[0].addr.to_str()].append(lvap.addr.to_str())
         self.stations_aps_matrix[lvap.addr.to_str()] = []
-        self.stations_aps_matrix[lvap.addr.to_str()].append(lvap.default_block.addr.to_str())
+        self.stations_aps_matrix[lvap.addr.to_str()].append(lvap.blocks[0].addr.to_str())
 
 
     def conflict_graph(self):
@@ -105,8 +107,8 @@ class NetworkColoring(EmpowerApp):
                     if conflict_wtp != wtp and (conflict_wtp not in self.conflict_aps[wtp]):
                         self.conflict_aps[wtp].append(conflict_wtp)
 
-        if initial_conflict_graph != self.conflict_aps:
-            self.network_coloring()
+        # if initial_conflict_graph != self.conflict_aps:
+        self.network_coloring()
 
     def delete_ucqm_worker(self, block):
         worker = RUNTIME.components[UCQMWorker.__module__]
@@ -144,25 +146,40 @@ class NetworkColoring(EmpowerApp):
 
         network_graph = {}
 
-        if not self.conflict_aps:
-            conflict_aps["00:0D:B9:3E:05:44"] = ["00:0D:B9:3E:06:9C", "00:0D:B9:3E:D9:DC"]
-            conflict_aps["00:0D:B9:3E:06:9C"] = ["00:0D:B9:3E:05:44", "00:0D:B9:3E:D9:DC"]
-            conflict_aps["00:0D:B9:3E:D9:DC"] = ["00:0D:B9:3E:06:9C", "00:0D:B9:3E:05:44"]
+        # if not self.conflict_aps:
+            # conflict_aps["00:0D:B9:3E:05:44"] = ["00:0D:B9:3E:06:9C", "00:0D:B9:3E:D9:DC"]
+            # conflict_aps["00:0D:B9:3E:06:9C"] = ["00:0D:B9:3E:05:44", "00:0D:B9:3E:D9:DC"]
+            # conflict_aps["00:0D:B9:3E:D9:DC"] = ["00:0D:B9:3E:06:9C", "00:0D:B9:3E:05:44"]
+
+        self.conflict_aps["00:0D:B9:2F:56:40"] = ["00:0D:B9:2F:63:84", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:58:30", "00:0D:B9:2F:58:38", "00:0D:B9:2F:56:7C"]
+        self.conflict_aps["00:0D:B9:2F:56:7C"] = ["00:0D:B9:2F:63:E0", "00:0D:B9:2F:58:38", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:58:30", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:40", "00:0D:B9:2F:57:90", "00:0D:B9:2F:63:84", "00:0D:B9:2F:57:8C"]
+        self.conflict_aps["00:0D:B9:2F:57:8C"] = ["00:0D:B9:2F:63:84", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:58:30", "00:0D:B9:2F:56:40", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:58:38"]
+        self.conflict_aps["00:0D:B9:2F:57:90"] = ["00:0D:B9:2F:58:38", "00:0D:B9:2F:58:30", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:7C"]
+        self.conflict_aps["00:0D:B9:2F:58:30"] = ["00:0D:B9:2F:5B:A8", "00:0D:B9:2F:58:38", "00:0D:B9:2F:56:40", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:63:84", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:57:90"]
+        self.conflict_aps["00:0D:B9:2F:58:38"] = ["00:0D:B9:2F:5B:A8", "00:0D:B9:2F:58:30", "00:0D:B9:2F:56:40", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:57:90", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:63:84"]
+        self.conflict_aps["00:0D:B9:2F:5B:A8"] = ["00:0D:B9:2F:58:30", "00:0D:B9:2F:58:38", "00:0D:B9:2F:56:40", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:63:84", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:57:90"]
+        self.conflict_aps["00:0D:B9:2F:60:B4"] = ["00:0D:B9:2F:63:84", "00:0D:B9:2F:63:E0", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:58:30", "00:0D:B9:2F:56:40", "00:0D:B9:2F:58:38", "00:0D:B9:2F:57:90", "00:0D:B9:2F:56:7C"]
+        self.conflict_aps["00:0D:B9:2F:63:84"] = ["00:0D:B9:2F:63:E0", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:5B:A8", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:58:30", "00:0D:B9:2F:56:40", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:58:38"]
+        self.conflict_aps["00:0D:B9:2F:63:E0"] = ["00:0D:B9:2F:5B:A8", "00:0D:B9:2F:58:30", "00:0D:B9:2F:58:38", "00:0D:B9:2F:56:40", "00:0D:B9:2F:60:B4", "00:0D:B9:2F:56:7C", "00:0D:B9:2F:63:84", "00:0D:B9:2F:57:8C", "00:0D:B9:2F:57:90"]
 
         for ap, conflict_list in self.conflict_aps.items():
             network_graph[ap] = set(conflict_list)
 
         network_graph = {n:neigh for n,neigh in network_graph.items() if neigh}
 
-        channel_assignment = self.solve_channel_assignment(network_graph, self.coloring_channels, dict(), 0)
+        temp_channel_assignment = self.solve_channel_assignment(network_graph, self.coloring_channels, dict(), 0)
+        if temp_channel_assignment and self.channel_assignment != temp_channel_assignment: 
+            self.channel_assignment = temp_channel_assignment
+        # if not self.channel_assignment:
+        #     self.channel_assignment = {"a":"b"}
 
         print("*******************")
-        print("Channel assignment: ", channel_assignment)
+        print("Channel assignment: ", self.channel_assignment)
         print("*******************")
 
-        for ap, channel in channel_assignment.items():
-            block = self.get_block_for_ap_addr(ap)
-            self.switch_channel_in_block(block, channel)
+        # for ap, channel in self.channel_assignment.items():
+        #     block = self.get_block_for_ap_addr(ap)
+        #     self.switch_channel_in_block(block, channel)
 
 
     def find_best_candidate(self, graph, guesses):
@@ -186,7 +203,6 @@ class NetworkColoring(EmpowerApp):
             return guesses # Solution is found
         for c in channels - {guesses[neigh] for neigh in graph[n] if neigh in guesses}:
             guesses[n] = c
-            indent = '  '*depth
             if self.solve_channel_assignment(graph, channels, guesses, depth+1):
                 return guesses
             else:
@@ -206,7 +222,6 @@ class NetworkColoring(EmpowerApp):
                 if poller.block.addr.to_str() + addr['addr'].to_str() in self.wifi_data:
                     self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['rssi'] = addr['mov_rssi']
                     self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['channel'] = poller.block.channel
-                    self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['active'] = active_flag
                 else:
                     self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()] = \
                                     {
@@ -243,7 +258,7 @@ class NetworkColoring(EmpowerApp):
                 self.update_block(block, channel)
 
                 for lvap in lvaps.values():
-                    if lvap.default_block.addr != block.addr:
+                    if lvap.blocks[0].addr != block.addr:
                         continue
                     lvap.scheduled_on = block
 
@@ -251,7 +266,7 @@ class NetworkColoring(EmpowerApp):
                     self.aps_clients_rel[block.addr.to_str()] = []
 
                     for lvap in lvaps.values():
-                        if lvap.default_block.addr != block.addr:
+                        if lvap.blocks[0].addr != block.addr:
                             continue
                         self.aps_clients_rel[block.addr.to_str()].append(lvap.addr.to_str())
 
@@ -276,7 +291,7 @@ class NetworkColoring(EmpowerApp):
 
         pass
 
-def launch(tenant_id, period=500):
+def launch(tenant_id, period=2000):
     """ Initialize the module. """
 
     return NetworkColoring(tenant_id=tenant_id, every=period)

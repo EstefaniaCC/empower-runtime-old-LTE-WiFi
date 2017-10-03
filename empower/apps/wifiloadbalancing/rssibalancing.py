@@ -26,7 +26,10 @@ from empower.bin_counter.bin_counter import BinCounter
 from empower.events.wtpup import wtpup
 from empower.events.lvapjoin import lvapjoin
 from empower.core.resourcepool import BANDS
+from empower.apps.survey import survey
 
+DEFAULT_ADDRESS = "ff:ff:ff:ff:ff:ff"
+DEFAULT_LIMIT = -30
 
 class RssiLoadBalancing(EmpowerApp):
     """Basic mobility manager.
@@ -49,6 +52,8 @@ class RssiLoadBalancing(EmpowerApp):
         self.initial_setup = True
         self.warm_up_phases = 20
 
+        self.__limit = DEFAULT_LIMIT
+
         # Register an wtp up event
         self.wtpup(callback=self.wtp_up_callback)
 
@@ -64,6 +69,17 @@ class RssiLoadBalancing(EmpowerApp):
         self.channels = self.channels_bg + self.channels_an
 
         self.test = "test1"
+        self.wifi_data = {}
+        self.stations_aps_matrix = {}
+
+    def to_dict(self):
+        """Return json-serializable representation of the object."""
+
+        out = super().to_dict()
+        out['wifi_data'] = self.wifi_data
+        out['stations_aps_matrix'] = self.stations_aps_matrix
+
+        return out
 
     def wtp_up_callback(self, wtp):
         """Called when a new WTP connects to the controller."""
@@ -76,7 +92,13 @@ class RssiLoadBalancing(EmpowerApp):
 
             self.ucqm(block=block,
                         tenant_id=self.tenant.tenant_id,
-                        every=self.every)
+                        every=self.every,
+                        callback=self.ucqm_callback)
+
+            self.summary(addr=DEFAULT_ADDRESS,
+                         block=block,
+                         every=self.every,
+                         callback=self.summary_callback)
 
 
     def lvap_join_callback(self, lvap):
@@ -85,6 +107,80 @@ class RssiLoadBalancing(EmpowerApp):
         self.bin_counter(lvap=lvap.addr,
                  every=1000,
                  callback=self.counters_callback)
+
+        self.rssi(lvap=lvap.addr,
+                  value=self.limit,
+                  relation='LT',
+                  callback=self.low_rssi)
+
+        self.stations_aps_matrix[lvap.addr.to_str()] = []
+        if lvap.blocks[0].addr.to_str() not in self.stations_aps_matrix[lvap.addr.to_str()]:
+            self.stations_aps_matrix[lvap.addr.to_str()].append(lvap.blocks[0].addr.to_str())
+
+    def ucqm_callback(self, poller):
+        """Called when a UCQM response is received from a WTP."""
+
+        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
+
+        for addr in poller.maps.values():
+            # This means that this lvap is attached to a WTP in the network.
+            if addr['addr'] in lvaps and lvaps[addr['addr']].wtp:
+                active_flag = 1
+
+                if (lvaps[addr['addr']].wtp.addr != poller.block.addr):
+                    active_flag = 0
+                elif ((lvaps[addr['addr']].wtp.addr == poller.block.addr and (lvaps[addr['addr']].association_state == False))):
+                    active_flag = 0
+
+                if poller.block.addr.to_str() + addr['addr'].to_str() in self.wifi_data:
+                    self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['rssi'] = addr['mov_rssi']
+                    self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['channel'] = poller.block.channel
+                    self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]['active'] = active_flag
+                else:
+                    self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()] = \
+                                    {
+                                        'rssi': addr['mov_rssi'],
+                                        'wtp': poller.block.addr.to_str(),
+                                        'sta': addr['addr'].to_str(),
+                                        'channel': poller.block.channel,
+                                        'active': active_flag,
+                                        'tx_bytes_per_second': 0,
+                                        'rx_bytes_per_second': 0,
+                                        'reesched_attempts': 0,
+                                        'revert_attempts': 0,
+                                        'rate': 0,
+                                        'rate_attempts': 0
+                                    }
+
+                # Conversion of the data structure to obtain the conflict APs
+                if addr['addr'].to_str() not in self.stations_aps_matrix:
+                    self.stations_aps_matrix[addr['addr'].to_str()] = []
+                if poller.block.addr.to_str() not in self.stations_aps_matrix[addr['addr'].to_str()]:
+                    self.stations_aps_matrix[addr['addr'].to_str()].append(poller.block.addr.to_str())
+
+            elif poller.block.addr.to_str() + addr['addr'].to_str() in self.wifi_data:
+                del self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]
+
+    def summary_callback(self, summary):
+        """ New stats available. """
+
+        self.log.info("New summary from %s addr %s frames %u", summary.block,
+                      summary.addr, len(summary.frames))
+
+        # per block log
+        filename = "survey_rssibalancing_%s_%s_%u_%s.csv" % (self.test, summary.block.addr,
+                                            summary.block.channel,
+                                            BANDS[summary.block.band])
+
+        for frame in summary.frames:
+
+            line = "%u,%g,%s,%d,%u,%s,%s,%s,%s,%s\n" % \
+                (frame['tsft'], frame['rate'], frame['rtype'], frame['rssi'],
+                 frame['length'], frame['type'], frame['subtype'],
+                 frame['ra'], frame['ta'], frame['seq'])
+
+            with open(filename, 'a') as file_d:
+                file_d.write(line)
 
     def counters_callback(self, stats):
         """ New stats available. """
@@ -111,7 +207,7 @@ class RssiLoadBalancing(EmpowerApp):
         """ New stats available. """
 
         # per block log
-        filename = "rssiloadbalancing_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
+        filename = "rssibalancing_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
                                             block.channel,
                                             BANDS[block.band])
 
@@ -123,35 +219,23 @@ class RssiLoadBalancing(EmpowerApp):
         with open(filename, 'a') as file_d:
             file_d.write(line)
 
-        # per link log
+    @property
+    def limit(self):
+        """Return loop period."""
 
-        link = "%s_%s_%u_%s" % (lvap.addr.to_str(), block.addr.to_str(),
-                                block.channel, BANDS[block.band])
+        return self.__limit
 
-        filename = "rssiloadbalancing_%s_link_%s.csv" % (self.test, link)
+    @limit.setter
+    def limit(self, value):
+        """Set limit."""
 
-        line = "%f,%d,%d\n" % \
-            (stats.last, stats.rx_bytes_per_second[0], stats.tx_bytes_per_second[0])
+        limit = int(value)
 
-        with open(filename, 'a') as file_d:
-            file_d.write(line)
+        if limit > 0 or limit < -100:
+            raise ValueError("Invalid value for limit")
 
-    def handover(self, lvap):
-        """ Handover the LVAP to a WTP with
-        an RSSI higher that -65dB. """
-
-        self.log.info("Running handover...")
-
-        pool = self.blocks()
-
-        if not pool:
-            return
-
-        new_block = max(pool, key=lambda x: x.ucqm[lvap.addr]['mov_rssi'])
-        self.log.info("LVAP %s setting new block %s" % (lvap.addr, new_block))
-
-        lvap.blocks = new_block
-
+        self.log.info("Setting limit %u dB" % value)
+        self.__limit = limit
 
     def low_rssi(self, trigger):
         """ Perform handover if an LVAP's rssi is
@@ -168,21 +252,64 @@ class RssiLoadBalancing(EmpowerApp):
 
         self.handover(lvap)
 
+    def handover(self, lvap):
+        """ Handover the LVAP to a WTP with
+        an RSSI higher that -65dB. """
+
+        self.log.info("Running handover...")
+
+        # pool = self.blocks()
+
+        # if not pool:
+        #     return
+
+        # new_block = max(pool, key=lambda x: x.ucqm[lvap.addr]['mov_rssi'])
+
+        block = lvap.blocks[0]
+
+        if block.addr.to_str() + lvap.addr.to_str() not in self.wifi_data or \
+           self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi'] is None:
+           return
+
+        if lvap.addr.to_str() not in self.stations_aps_matrix:
+            return
+
+        current_rssi = self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi']
+        best_rssi = -120
+        new_block = None
+
+        for wtp in self.stations_aps_matrix[lvap.addr.to_str()]:
+            if wtp == block.addr.to_str():
+                continue
+            if self.wifi_data[wtp + lvap.addr.to_str()]['rssi'] <= (current_rssi) or \
+                self.wifi_data[wtp + lvap.addr.to_str()]['rssi'] < best_rssi or self.wifi_data[wtp + lvap.addr.to_str()]['rssi'] == 0:
+                continue
+
+            best_rssi = self.wifi_data[wtp + lvap.addr.to_str()]['rssi']
+            new_block = self.get_block_for_ap_addr(wtp)
+
+        if not new_block:
+            return
+
+        self.log.info("LVAP %s setting new block %s" % (lvap.addr, new_block))
+
+        lvap.blocks = new_block
+
+    def get_block_for_ap_addr(self, addr):
+        wtps = RUNTIME.tenants[self.tenant.tenant_id].wtps
+        for wtp in wtps.values():
+            for block in wtp.supports:
+                if block.addr.to_str() != addr:
+                    continue
+                return block
+
+        return None
+
     def loop(self):
         """ Periodic job. """
 
-        # Handover every active LVAP to
-        # the best WTP
-
-        if self.warm_up_phases > 0 and self.initial_setup:
-            self.warm_up_phases -= 1
-        elif self.warm_up_phases == 0 and self.initial_setup:
-            #Message to the APs to change the channel
-            self.initial_setup = False
-            #self.set_random_channels()
-        else:
-            for lvap in self.lvaps():
-                self.handover(lvap)
+        for lvap in self.lvaps():
+            self.handover(lvap)
 
 
 def launch(tenant_id, every=DEFAULT_PERIOD):

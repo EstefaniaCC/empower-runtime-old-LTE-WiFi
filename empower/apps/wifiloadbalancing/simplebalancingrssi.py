@@ -40,8 +40,6 @@ from empower.apps.survey import survey
 
 RSSI_LIMIT = 8
 
-DEFAULT_ADDRESS = "ff:ff:ff:ff:ff:ff"
-
 class WifiLoadBalancing(EmpowerApp):
 
     def __init__(self, **kwargs):
@@ -116,7 +114,7 @@ class WifiLoadBalancing(EmpowerApp):
                         every=self.every,
                         callback=self.ucqm_callback)
 
-            self.summary(addr=DEFAULT_ADDRESS,
+            self.summary(addr=self.addr,
                          block=block,
                          every=self.every,
                          callback=self.summary_callback)
@@ -166,7 +164,7 @@ class WifiLoadBalancing(EmpowerApp):
                       summary.addr, len(summary.frames))
 
         # per block log
-        filename = "survey_wifiloadbalancing_%s_%s_%u_%s.csv" % (self.test, summary.block.addr,
+        filename = "survey_simplebalancingrssi_%s_%s_%u_%s.csv" % (self.test, summary.block.addr,
                                             summary.block.channel,
                                             BANDS[summary.block.band])
 
@@ -179,7 +177,6 @@ class WifiLoadBalancing(EmpowerApp):
 
             with open(filename, 'a') as file_d:
                 file_d.write(line)
-
 
     def lvap_stats_callback(self, counter):
         """ New stats available. """
@@ -238,8 +235,7 @@ class WifiLoadBalancing(EmpowerApp):
         self.wifi_data[key]['rate_attempts'] = 0
         
         new_occupancy = self.update_occupancy_ratio(lvap.blocks[0])
-        # average_occupancy = self.average_occupancy_surrounding_aps(lvap)
-        average_occupancy = self.estimate_global_occupancy_ratio()
+        average_occupancy = self.average_occupancy_surrounding_aps(lvap)
 
         # print("counters")
         # print("------self.bitrate_data_active[block]", self.bitrate_data_active[lvap.blocks[0].addr.to_str()])
@@ -349,8 +345,7 @@ class WifiLoadBalancing(EmpowerApp):
             self.wifi_data[key]['revert_attempts'] += 1
 
         new_occupancy = self.update_occupancy_ratio(block)
-        # average_occupancy = self.average_occupancy_surrounding_aps(lvap)
-        average_occupancy = self.estimate_global_occupancy_ratio()
+        average_occupancy = self.average_occupancy_surrounding_aps(lvap)
         print("self.old_aps_occupancy[block.addr.to_str()] ", self.old_aps_occupancy[block.addr.to_str()])
 
         #if new_occupancy != average_occupancy:
@@ -394,7 +389,7 @@ class WifiLoadBalancing(EmpowerApp):
         """ New stats available. """
 
         # per block log
-        filename = "wifiloadbalancing_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
+        filename = "simplebalancingrssi_%s_%s_%u_%s.csv" % (self.test, block.addr.to_str(),
                                             block.channel,
                                             BANDS[block.band])
 
@@ -505,14 +500,10 @@ class WifiLoadBalancing(EmpowerApp):
             print("wifi data src block %s" %(block.addr.to_str()), file=fh)
             for key, clients in self.aps_clients_rel.items():
                 for client in clients:
-                    if block.addr.to_str()+client not in self.wifi_data:
-                        continue
                     print(self.wifi_data[block.addr.to_str()+client], file=fh)
             print("wifi data dst block %s" %(new_block.addr.to_str()), file=fh)
             for key, clients in self.aps_clients_rel.items():
                 for client in clients:
-                    if new_block.addr.to_str()+client not in self.wifi_data:
-                        continue
                     print(self.wifi_data[new_block.addr.to_str()+client], file=fh)
             fh.close()
         except ValueError:
@@ -528,8 +519,7 @@ class WifiLoadBalancing(EmpowerApp):
         if block.addr.to_str() not in self.aps_occupancy:
             return
 
-        # average_occupancy = self.average_occupancy_surrounding_aps(lvap)
-        average_occupancy = self.estimate_global_occupancy_ratio()
+        average_occupancy = self.average_occupancy_surrounding_aps(lvap)
         new_block = None
         clients_candidates = {}
 
@@ -571,10 +561,6 @@ class WifiLoadBalancing(EmpowerApp):
                 print("              * AP candidate %s occupancy %f RSSI sta-wtp %d" % (wtp, self.aps_occupancy[wtp], self.wifi_data[wtp + sta]['rssi']), file=fh)
                 #TODO. ADD THRES. WHEN THE UNITS OF THE OCCUPANCY ARE KNOWN
                 if wtp == block.addr.to_str():
-                    continue
-                # print("Candidate %s occupancy %f" %(wtp, self.aps_occupancy[wtp]))
-                if self.aps_occupancy[wtp] > self.aps_occupancy[block.addr.to_str()] \
-                    or self.wifi_data[wtp + sta]['rssi'] < -85:
                     continue
 
                 # Checks if a similar handover has been performed in an appropiate way.
@@ -625,15 +611,16 @@ class WifiLoadBalancing(EmpowerApp):
         highest_metric = sys.maxsize
         best_wtp = None
         best_lvap = None
+        best_rssi = -120
         for sta, wtps in clients_candidates.items():
             for ap in wtps:
-                if ap['metric'] < highest_metric and ap['conf_metric'] < highest_metric:
-                    highest_metric = ap['conf_metric']
+                if ap['rssi'] > best_rssi and ap['rssi'] != 0:
+                    best_rssi = ap['rssi']
                     best_wtp = ap['wtp']
                     best_lvap = sta
                 # In case of finding 2 candidates lvaps whose target WTPs occupancy is the same, we will take the one
                 # whose current wtp occupancy is higher. In that case it will be less crowded after the handover
-                elif ap['metric'] == highest_metric and ap['conf_metric'] == highest_metric:
+                elif ap['rssi'] == best_rssi:
                     if self.aps_occupancy[ap['wtp']] > self.aps_occupancy[best_wtp]:
                         best_wtp = ap['wtp']
                         best_lvap = sta
@@ -796,7 +783,6 @@ class WifiLoadBalancing(EmpowerApp):
                 del self.wifi_data[poller.block.addr.to_str() + addr['addr'].to_str()]
 
         self.conflict_graph()
-
 
     def average_occupancy_surrounding_aps(self, lvap):
         # average_occupancy = 0
@@ -981,19 +967,7 @@ class WifiLoadBalancing(EmpowerApp):
                 new_occupancy < (old_occupancy * 0.975) or new_occupancy > (old_occupancy * 1.025):
                 return True
             return False
-
-
-    def evaluate_movement(self):
-        lvaps = RUNTIME.tenants[self.tenant.tenant_id].lvaps
-        for lvap in lvaps.values():
-            block = lvap.blocks[0]
-
-            if block.addr.to_str() + lvap.addr.to_str() not in self.wifi_data or \
-                self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi'] is None:
-                continue
-
-            if self.wifi_data[block.addr.to_str() + lvap.addr.to_str()]['rssi'] < -85 and len(self.stations_aps_matrix[lvap.addr.to_str()]) >= 2:
-                self.evaluate_lvap_revert(lvap)
+        
 
     def loop(self):
         """ Periodic job. """
@@ -1006,7 +980,6 @@ class WifiLoadBalancing(EmpowerApp):
         elif not self.initial_setup:
             if self.handover_occupancies:
                 self.evaluate_handover()
-            self.evaluate_movement()
 
 def launch(tenant_id, period=1000):
     """ Initialize the module. """

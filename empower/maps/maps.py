@@ -181,7 +181,7 @@ class Maps(Module):
         """
 
         # update cache
-        setattr(self.block, self.MODULE_NAME, CQM())
+        # setattr(self.block, self.MODULE_NAME, CQM())
         map_entry_block = getattr(self.block, self.MODULE_NAME)
 
         # update this object

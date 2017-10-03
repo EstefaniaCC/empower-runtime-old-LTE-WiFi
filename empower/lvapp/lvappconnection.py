@@ -485,6 +485,8 @@ class LVAPPConnection(object):
         # set supported band
         lvap.supported_band = request.supported_band
 
+        lvap.reset_downlink_port()
+
         # this will trigger an add lvap message to update the assoc id
         lvap.assoc_id = self.server.assoc_id
 
