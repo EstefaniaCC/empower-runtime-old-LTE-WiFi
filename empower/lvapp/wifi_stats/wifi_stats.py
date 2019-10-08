@@ -279,8 +279,8 @@ class WiFiStats(ModulePeriodic):
         self.handle_callback(self)
 
         # update Influxdb
-        self.update_db([sample for measurements in self.wifi_stats.values()
-                        for sample in measurements])
+        # self.update_db([sample for measurements in self.wifi_stats.values()
+        #                 for sample in measurements])
 
     def update_stats(self, stats):
         """Update stats."""

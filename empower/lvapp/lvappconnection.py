@@ -223,6 +223,8 @@ class LVAPPConnection:
 
             handler_name = "_handle_%s" % self.server.pt_types[msg_type].name
 
+            self.log.info("handler name %s", handler_name)
+
             if hasattr(self, handler_name):
                 handler = getattr(self, handler_name)
                 handler(wtp, msg)
@@ -772,6 +774,7 @@ class LVAPPConnection:
         tx_policy.set_rts_cts(status.rts_cts)
         tx_policy.set_mcast(status.tx_mcast)
         tx_policy.set_ur_count(status.ur_mcast_count)
+        tx_policy.set_max_amsdu_len(status.max_amsdu_len)
         tx_policy.set_no_ack(status.flags.no_ack)
 
         self.log.info("Tranmission policy status %s", tx_policy)
@@ -828,6 +831,11 @@ class LVAPPConnection:
             if wtp.addr not in slc.wifi['wtps']:
                 slc.wifi['wtps'][wtp.addr] = {'static-properties': {}}
             slc.wifi['wtps'][wtp.addr]['static-properties']['scheduler'] = status.scheduler
+
+        if prop['max_aggr_length'] != status.max_aggr_length:
+            if wtp.addr not in slc.wifi['wtps']:
+                slc.wifi['wtps'][wtp.addr] = {'static-properties': {}}
+            slc.wifi['wtps'][wtp.addr]['static-properties']['max_aggr_length'] = status.max_aggr_length
 
         self.log.info("Slice %s updated", slc)
 
@@ -956,7 +964,7 @@ class LVAPPConnection:
         rates = sorted([int(x * 2) for x in tx_policy.mcs])
         ht_rates = sorted([int(x) for x in tx_policy.ht_mcs])
 
-        msg = Container(length=32 + len(rates) + len(ht_rates),
+        msg = Container(length=34 + len(rates) + len(ht_rates),
                         flags=flags,
                         sta=tx_policy.addr.to_raw(),
                         hwaddr=tx_policy.block.hwaddr.to_raw(),
@@ -965,6 +973,7 @@ class LVAPPConnection:
                         rts_cts=tx_policy.rts_cts,
                         tx_mcast=tx_policy.mcast,
                         ur_mcast_count=tx_policy.ur_count,
+                        max_amsdu_len=tx_policy.max_amsdu_len,
                         nb_mcses=len(rates),
                         nb_ht_mcses=len(ht_rates),
                         mcs=rates,
@@ -1053,6 +1062,7 @@ class LVAPPConnection:
         amsdu_aggregation = slc.wifi['static-properties']['amsdu_aggregation']
         quantum = slc.wifi['static-properties']['quantum']
         scheduler = slc.wifi['static-properties']['scheduler']
+        max_aggr_length = slc.wifi['static-properties']['max_aggr_length']
 
         if self.wtp.addr in slc.wifi['wtps']:
 
@@ -1067,6 +1077,9 @@ class LVAPPConnection:
             if 'scheduler' in static:
                 scheduler = static['scheduler']
 
+            if 'max_aggr_length' in static:
+                max_aggr_length = static['max_aggr_length']
+
         flags = Container(amsdu_aggregation=amsdu_aggregation)
 
         msg = Container(length=SET_SLICE.sizeof(),
@@ -1077,6 +1090,7 @@ class LVAPPConnection:
                         quantum=quantum,
                         scheduler=scheduler,
                         dscp=slc.dscp.to_raw(),
+                        max_aggr_length=max_aggr_length,
                         ssid=ssid.to_raw())
 
         return self.send_message(PT_SET_SLICE, msg)

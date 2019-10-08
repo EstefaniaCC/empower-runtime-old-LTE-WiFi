@@ -250,6 +250,7 @@ SET_TRANSMISSION_POLICY = \
            UBInt16("rts_cts"),
            UBInt8("tx_mcast"),
            UBInt8("ur_mcast_count"),
+           UBInt16("max_amsdu_len"),
            UBInt8("nb_mcses"),
            UBInt8("nb_ht_mcses"),
            Array(lambda ctx: ctx.nb_mcses, UBInt8("mcs")),
@@ -281,6 +282,7 @@ STATUS_TRANSMISSION_POLICY = \
            UBInt16("rts_cts"),
            UBInt8("tx_mcast"),
            UBInt8("ur_mcast_count"),
+           UBInt16("max_amsdu_len"),
            UBInt8("nb_mcses"),
            UBInt8("nb_ht_mcses"),
            Array(lambda ctx: ctx.nb_mcses, UBInt8("mcs")),
@@ -345,6 +347,7 @@ SET_SLICE = \
            UBInt32("quantum"),
            UBInt32("scheduler"),
            UBInt8("dscp"),
+           UBInt32("max_aggr_length"),
            Bytes("ssid", WIFI_NWID_MAXSIZE + 1))
 
 DEL_SLICE = \
@@ -374,6 +377,7 @@ STATUS_SLICE = \
            UBInt32("quantum"),
            UBInt32("scheduler"),
            UBInt8("dscp"),
+           UBInt32("max_aggr_length"),
            Bytes("ssid", WIFI_NWID_MAXSIZE + 1))
 
 IGMP_REPORT = Struct("igmp_report", UBInt8("version"),

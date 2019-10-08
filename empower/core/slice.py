@@ -47,7 +47,8 @@ class Slice:
             "static-properties": {
               "amsdu_aggregation": true,
               "quantum": 12000,
-              "scheduler": 0
+              "scheduler": 0,
+              "max_aggr_length": 2000
             }
         },
         "lte": {
@@ -71,7 +72,8 @@ class Slice:
             "static-properties": {
               "amsdu_aggregation": true,
               "quantum": 12000,
-              "scheduler":0
+              "scheduler":0,
+              "max_aggr_length": 2000
             },
             "wtps": {
               "00:0D:B9:2F:56:64": {
@@ -114,7 +116,8 @@ class Slice:
             'static-properties': {
                 'amsdu_aggregation': False,
                 'quantum': 12000,
-                'scheduler': WIFI_SLICE_SCHED['DEFICIT_ROUND_ROBIN']
+                'scheduler': WIFI_SLICE_SCHED['DEFICIT_ROUND_ROBIN'],
+                'max_aggr_length': 2000
             },
             'wtps': {}
         }
@@ -177,6 +180,16 @@ class Slice:
 
             self.wifi['static-properties']['scheduler'] = scheduler
 
+        if 'max_aggr_length' in descriptor['wifi']['static-properties']:
+
+            max_aggr_length = \
+                descriptor['wifi']['static-properties']['max_aggr_length']
+
+            if not isinstance(max_aggr_length, int):
+                max_aggr_length = int(max_aggr_length)
+
+            self.wifi['static-properties']['max_aggr_length'] = max_aggr_length
+
     def __parse_wtps_descriptor(self, descriptor):
 
         for addr in descriptor['wifi']['wtps']:
@@ -230,6 +243,19 @@ class Slice:
                         raise ValueError("Invalid Wi-Fi slice scheduler")
 
                     props['scheduler'] = scheduler
+
+                if 'max_aggr_length' in \
+                    descriptor['wifi']['wtps'][addr]['static-properties']:
+
+                    max_aggr_length = descriptor['wifi']['wtps'][addr] \
+                        ['static-properties']['max_aggr_length']
+
+                    props = self.wifi['wtps'][wtp_addr]['static-properties']
+
+                    if not isinstance(max_aggr_length, int):
+                        max_aggr_length = int(max_aggr_length)
+
+                    props['max_aggr_length'] = max_aggr_length
 
     def __parse_lte_descriptor(self, descriptor):
 

@@ -97,7 +97,7 @@ class MCastManager(EmpowerApp):
                 else:
                     txp.mcs = [min(block.supports)]
 
-        if demo_mode != TX_MCAST_DMSPLAY_H:
+        if demo_mode != TX_MCAST_SDNPLAY_H:
             self.status['MCS'] = "None"
             self.status['Phase'] = "None"
 
@@ -247,7 +247,7 @@ class MCastManager(EmpowerApp):
         return out
 
 
-def launch(tenant_id, every=1000):
+def launch(tenant_id, every=1000, demo_mode=TX_MCAST_SDNPLAY_H):
     """ Initialize the module. """
 
-    return MCastManager(tenant_id=tenant_id, every=every)
+    return MCastManager(tenant_id=tenant_id, every=every, demo_mode=demo_mode)

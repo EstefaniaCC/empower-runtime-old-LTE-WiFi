@@ -106,6 +106,7 @@ class BinCounter(ModulePeriodic):
         self.rx_bytes_per_second = []
 
         self.last = None
+        self.timestamp = None
 
     def __eq__(self, other):
 
@@ -280,6 +281,7 @@ class BinCounter(ModulePeriodic):
         """
 
         # update this object
+
         tx_samples = response.stats[0:response.nb_tx]
         rx_samples = response.stats[response.nb_tx:-1]
 
@@ -340,9 +342,10 @@ class BinCounter(ModulePeriodic):
             }
             samples.append(sample)
 
-        self.update_db(samples)
+        # self.update_db(samples)
 
         self.last = time.time()
+        self.timestamp = datetime.utcnow()
 
         # call callback
         self.handle_callback(self)

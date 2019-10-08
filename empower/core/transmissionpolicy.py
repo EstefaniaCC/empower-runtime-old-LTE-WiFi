@@ -60,6 +60,7 @@ class TxPolicy:
         self._mcs = block.supports
         self._ht_mcs = block.ht_supports
         self._ur_count = 3
+        self._max_amsdu_len = 3839
 
     def to_dict(self):
         """Return a json-frinedly representation of the object."""
@@ -69,7 +70,8 @@ class TxPolicy:
                 'mcast': TX_MCAST[self.mcast],
                 'mcs': sorted(self.mcs),
                 'ht_mcs': sorted(self.ht_mcs),
-                'ur_count': self.ur_count}
+                'ur_count': self.ur_count,
+                'max_amsdu_len': self.max_amsdu_len}
 
     def __repr__(self):
 
@@ -77,9 +79,28 @@ class TxPolicy:
         ht_mcs = ", ".join([str(x) for x in self.ht_mcs])
 
         return \
-            "%s no_ack %s rts_cts %u mcast %s mcs %s ht_mcs %s ur_count %u" % \
+            "%s no_ack %s rts_cts %u mcast %s mcs %s ht_mcs %s ur_count %u max_amsdu_len %u" % \
             (self.addr, self.no_ack, self.rts_cts, TX_MCAST[self.mcast],
-             mcs, ht_mcs, self.ur_count)
+             mcs, ht_mcs, self.ur_count, self.max_amsdu_len)
+
+    @property
+    def max_amsdu_len(self):
+        """Get max_amsdu_len."""
+
+        return self._max_amsdu_len
+
+    @max_amsdu_len.setter
+    def max_amsdu_len(self, max_amsdu_len):
+        """Set max_amsdu_len."""
+
+        self.set_max_amsdu_len(max_amsdu_len)
+
+        self.block.radio.connection.send_set_transmission_policy(self)
+
+    def set_max_amsdu_len(self, max_amsdu_len):
+        """Set max_amsdu_len without sending anything."""
+
+        self._max_amsdu_len = int(max_amsdu_len)
 
     @property
     def ur_count(self):
@@ -87,7 +108,7 @@ class TxPolicy:
 
         return self._ur_count
 
-    @ur_count .setter
+    @ur_count.setter
     def ur_count(self, ur_count):
         """Set ur_count."""
 

@@ -29,6 +29,9 @@ from construct import BitStruct
 from construct import Padding
 from construct import Bit
 
+import time
+from datetime import datetime
+
 from empower.core.resourcepool import BT_L20
 from empower.core.app import EmpowerApp
 from empower.datatypes.etheraddress import EtherAddress
@@ -49,7 +52,20 @@ RATES_ENTRY = Sequence("rates",
                                  Bit("mcs"),
                                  Padding(9)),
                        UBInt32("prob"),
-                       UBInt32("cur_prob"))
+                       UBInt32("cur_prob"),
+                       UBInt32("throughput"),
+                       UBInt32("attempts"),
+                       UBInt32("success"),
+                       UBInt32("cur_attempts"),
+                       UBInt32("cur_success"),
+                       UBInt32("hist_attempts"),
+                       UBInt32("hist_success"),
+                       UBInt32("attempts_bytes"),
+                       UBInt32("success_bytes"),
+                       UBInt32("cur_attempts_bytes"),
+                       UBInt32("cur_success_bytes"),
+                       UBInt32("hist_attempts_bytes"),
+                       UBInt32("hist_success_bytes"))
 
 RATES_REQUEST = Struct("rates_request", UBInt8("version"),
                        UBInt8("type"),
@@ -84,6 +100,7 @@ class LVAPStats(ModulePeriodic):
         # data structures
         self.rates = {}
         self.best_prob = None
+        self.timestamp = None
 
     def __eq__(self, other):
 
@@ -159,14 +176,30 @@ class LVAPStats(ModulePeriodic):
         lvap = tenant.lvaps[self.lvap]
 
         # update this object
+        old_rates = self.rates
         self.rates = {}
         for entry in response.rates:
             if lvap.supported_band == BT_L20:
                 rate = entry[0] / 2.0
             else:
                 rate = entry[0]
+
             value = {'prob': entry[2] / 180.0,
-                     'cur_prob': entry[3] / 180.0, }
+                     'cur_prob': entry[3] / 180.0,
+                     'throughput': (entry[4] / ((18000 << 10) / 96) / 10),
+                     'attempts': entry[5],
+                     'success': entry[6],
+                     'cur_attempts': entry[7],
+                     'cur_success': entry[8],
+                     'hist_attempts': entry[9],
+                     'hist_success': entry[10],
+                     'attempts_bytes': entry[11],
+                     'success_bytes': entry[12],
+                     'cur_attempts_bytes': entry[13],
+                     'cur_success_bytes': entry[14],
+                     'hist_attempts_bytes': entry[15],
+                     'hist_success_bytes': entry[16]
+                    }
             self.rates[rate] = value
 
         max_idx = max(self.rates.keys(),
@@ -175,6 +208,8 @@ class LVAPStats(ModulePeriodic):
 
         self.best_prob = \
             max([k for k, v in self.rates.items() if v['prob'] == max_val])
+
+        self.timestamp = datetime.utcnow()
 
         # call callback
         self.handle_callback(self)
